@@ -1,0 +1,12 @@
+C:\class\sleeper\src\Sleeper.Api\obj\Debug\net10.0\Sleeper.Api.csproj.AssemblyReference.cache
+C:\class\sleeper\src\Sleeper.Api\obj\Debug\net10.0\Sleeper.Api.GeneratedMSBuildEditorConfig.editorconfig
+C:\class\sleeper\src\Sleeper.Api\obj\Debug\net10.0\Sleeper.Api.AssemblyInfoInputs.cache
+C:\class\sleeper\src\Sleeper.Api\obj\Debug\net10.0\Sleeper.Api.AssemblyInfo.cs
+C:\class\sleeper\src\Sleeper.Api\obj\Debug\net10.0\Sleeper.Api.csproj.CoreCompileInputs.cache
+C:\class\sleeper\src\Sleeper.Api\bin\Debug\net10.0\Sleeper.Api.deps.json
+C:\class\sleeper\src\Sleeper.Api\bin\Debug\net10.0\Sleeper.Api.dll
+C:\class\sleeper\src\Sleeper.Api\bin\Debug\net10.0\Sleeper.Api.pdb
+C:\class\sleeper\src\Sleeper.Api\obj\Debug\net10.0\Sleeper.Api.dll
+C:\class\sleeper\src\Sleeper.Api\obj\Debug\net10.0\refint\Sleeper.Api.dll
+C:\class\sleeper\src\Sleeper.Api\obj\Debug\net10.0\Sleeper.Api.pdb
+C:\class\sleeper\src\Sleeper.Api\obj\Debug\net10.0\ref\Sleeper.Api.dll
