@@ -39,7 +39,12 @@ internal sealed class SeasonAggregateBuilder
         // 1. Build the championship-week envelope. This gives us Owners, final Standings,
         //    Schedule, and the resolved SeasonOutcome (placements + next-year draft picks).
         var envBuilder = new RecapEnvelopeBuilder(_sleeper, _sleeperService, _nfl, _lore);
-        var envelope = await envBuilder.BuildAsync(leagueId, RecapEnvelopeBuilder.Schedule.ChampionshipWeek, overrideSeason, ct).ConfigureAwait(false);
+        var envelope = await envBuilder.BuildAsync(
+            leagueId,
+            RecapEnvelopeBuilder.Schedule.ChampionshipWeek,
+            overrideSeason,
+            ct,
+            new RecapEnvelopeBuildOptions(PersistSnapshots: false)).ConfigureAwait(false);
 
         var schedule = envelope.Schedule ?? RecapEnvelopeBuilder.Schedule;
         int season = envelope.Meta.Season;
@@ -84,9 +89,9 @@ internal sealed class SeasonAggregateBuilder
                 if (mine is null) { weekly.Add(new WeeklyEntry(w, 0, 0, null, null, null, cw, cl, ct2, lastTeamName, cumPf, cumPa, cumPf - cumPa)); continue; }
                 var opp = weekMatchups.FirstOrDefault(m => m.MatchupId == mine.MatchupId && m.RosterId != owner.RosterId);
 
-                decimal myPts = (decimal)(mine.Points ?? 0);
-                decimal oppPts = opp is null ? 0 : (decimal)(opp.Points ?? 0);
-                int? result = opp is null ? null : (myPts > oppPts ? 1 : myPts < oppPts ? -1 : 0);
+                decimal myPts = mine.ScoreOrZero();
+                decimal oppPts = opp?.ScoreOrZero() ?? 0m;
+                int? result = opp is null || !PairHasPlayedScore(mine, opp) ? null : (myPts > oppPts ? 1 : myPts < oppPts ? -1 : 0);
 
                 // Regular-season-only roll-up for cumulative record (matches Sleeper's standings).
                 if (w <= schedule.RegularSeasonLastWeek && result is not null)
@@ -171,8 +176,8 @@ internal sealed class SeasonAggregateBuilder
             var weekMatchups = perWeekMatchups.GetValueOrDefault(w) ?? [];
             if (weekMatchups.Count == 0) continue;
             var top = weekMatchups
-                .Where(m => m.Points is not null)
-                .OrderByDescending(m => m.Points)
+                .Where(m => m.HasScoringData())
+                .OrderByDescending(m => m.ScoreOrZero())
                 .FirstOrDefault();
             if (top is null || !ownerByRoster.TryGetValue(top.RosterId, out var topOwner)) continue;
             weeklyChamps.Add(new WeeklyChampion(
@@ -180,7 +185,7 @@ internal sealed class SeasonAggregateBuilder
                 UserId: topOwner.UserId,
                 OwnerRealName: topOwner.RealName ?? topOwner.DisplayName ?? topOwner.TeamName,
                 TeamName: topOwner.TeamName,
-                PointsFor: Math.Round((decimal)(top.Points ?? 0), 2)));
+                PointsFor: Math.Round(top.ScoreOrZero(), 2)));
         }
 
         // 6. Highlights (single-week highs/lows, blowouts, upsets).
@@ -210,8 +215,8 @@ internal sealed class SeasonAggregateBuilder
     private static int? ComputeScoreRank(List<Matchup> weekMatchups, int rosterId)
     {
         var ordered = weekMatchups
-            .Where(m => m.Points is not null)
-            .OrderByDescending(m => m.Points)
+            .Where(m => m.HasScoringData())
+            .OrderByDescending(m => m.ScoreOrZero())
             .ToList();
         var idx = ordered.FindIndex(m => m.RosterId == rosterId);
         return idx < 0 ? null : idx + 1;
@@ -260,9 +265,9 @@ internal sealed class SeasonAggregateBuilder
             var weekMatchups = perWeekMatchups.GetValueOrDefault(w) ?? [];
             foreach (var m in weekMatchups)
             {
-                if (m.Points is null) continue;
+                if (!m.HasScoringData()) continue;
                 if (!ownerByRoster.TryGetValue(m.RosterId, out var owner)) continue;
-                decimal pts = (decimal)m.Points;
+                decimal pts = m.ScoreOrZero();
                 if (hi is null || pts > hi.Value) hi = new SingleScoreNote(w, owner.UserId, owner.RealName ?? owner.DisplayName ?? owner.TeamName, owner.TeamName, Math.Round(pts, 2), null);
                 if (pts > 0 && (lo is null || pts < lo.Value)) lo = new SingleScoreNote(w, owner.UserId, owner.RealName ?? owner.DisplayName ?? owner.TeamName, owner.TeamName, Math.Round(pts, 2), null);
             }
@@ -273,9 +278,9 @@ internal sealed class SeasonAggregateBuilder
                 var pair = grp.ToList();
                 if (pair.Count != 2) continue;
                 var a = pair[0]; var b = pair[1];
-                if (a.Points is null || b.Points is null) continue;
-                decimal aPts = (decimal)a.Points;
-                decimal bPts = (decimal)b.Points;
+                if (!PairHasPlayedScore(a, b)) continue;
+                decimal aPts = a.ScoreOrZero();
+                decimal bPts = b.ScoreOrZero();
                 if (aPts == bPts) continue;
                 var (winner, loser, wPts, lPts) = aPts > bPts ? (a, b, aPts, bPts) : (b, a, bPts, aPts);
                 if (!ownerByRoster.TryGetValue(winner.RosterId, out var wOwner)) continue;
@@ -314,10 +319,10 @@ internal sealed class SeasonAggregateBuilder
         {
             foreach (var m in perWeekMatchups.GetValueOrDefault(w) ?? [])
             {
-                if (m.Points is null) continue;
+                if (!m.HasScoringData()) continue;
                 if (!ownerByRoster.TryGetValue(m.RosterId, out var owner)) continue;
                 if (!pfByOwner.TryGetValue(owner.UserId, out var cur)) cur = (0m, owner);
-                cur.Pf += (decimal)m.Points;
+                cur.Pf += m.ScoreOrZero();
                 pfByOwner[owner.UserId] = cur;
             }
         }
@@ -463,4 +468,7 @@ internal sealed class SeasonAggregateBuilder
 
         return new SeasonAwards(season, leagueId, DateTimeOffset.UtcNow, list);
     }
+
+    private static bool PairHasPlayedScore(Matchup a, Matchup b)
+        => a.HasScoringData() || b.HasScoringData();
 }

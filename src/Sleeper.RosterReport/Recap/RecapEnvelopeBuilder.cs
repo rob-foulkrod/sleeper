@@ -53,8 +53,15 @@ internal sealed class RecapEnvelopeBuilder
         _lore = lore;
     }
 
-    public async Task<RecapEnvelope> BuildAsync(string leagueId, int week, int? overrideSeason, CancellationToken ct = default)
+    public async Task<RecapEnvelope> BuildAsync(
+        string leagueId,
+        int week,
+        int? overrideSeason,
+        CancellationToken ct = default,
+        RecapEnvelopeBuildOptions? options = null)
     {
+        options ??= new RecapEnvelopeBuildOptions();
+
         // 1. Pull league metadata, rosters, users, matchups, transactions in parallel.
         var leagueTask = _sleeper.GetLeagueAsync(leagueId, ct);
         var rostersTask = _sleeper.GetLeagueRostersAsync(leagueId, ct);
@@ -172,8 +179,8 @@ internal sealed class RecapEnvelopeBuilder
             GeneratedAt: DateTimeOffset.UtcNow);
 
         // 11b. New feature blocks.
-        var powerRankings = BuildPowerRankings(season, week, standings, perWeekPfByRoster, ownerByRosterId);
-        var playoffPicture = BuildPlayoffPicture(league, week, standings, ownerByRosterId, winnersBracket, losersBracket, nextWeekMatchups);
+        var powerRankings = BuildPowerRankings(season, week, standings, perWeekPfByRoster, ownerByRosterId, options.PersistSnapshots);
+        var playoffPicture = BuildPlayoffPicture(league, week, standings, ownerByRosterId, winnersBracket, losersBracket, matchups);
         var ledger = BuildSeasonLedger(standings, perWeekPfByRoster, streakByRoster, ownerByRosterId);
         var (weeklyTheme, bannedPhrases) = LoadWeeklyTheme(week);
         var previously = BuildPreviouslyOnLeague(season, week, standings, powerRankings, owners, perWeekPfByRoster, rosters, allWeekMatchups);
@@ -200,7 +207,8 @@ internal sealed class RecapEnvelopeBuilder
             SeasonOutcome: seasonOutcome);
 
         // 12. Snapshot team names for next week's run.
-        SnapshotTeamNames(season, week, owners);
+        if (options.PersistSnapshots)
+            SnapshotTeamNames(season, week, owners);
 
         return envelope;
     }
@@ -262,8 +270,7 @@ internal sealed class RecapEnvelopeBuilder
                 if (pair.Count != 2) continue;
                 var a = pair[0]; var b = pair[1];
                 if (!agg.ContainsKey(a.RosterId) || !agg.ContainsKey(b.RosterId)) continue;
-                decimal aPts = (decimal)a.Points;
-                decimal bPts = (decimal)b.Points;
+                if (!TryGetPlayedScores(a, b, out var aPts, out var bPts)) continue;
                 agg[a.RosterId].PointsFor += aPts;
                 agg[a.RosterId].PointsAgainst += bPts;
                 agg[b.RosterId].PointsFor += bPts;
@@ -518,7 +525,7 @@ internal sealed class RecapEnvelopeBuilder
             OwnerDisplay: owner?.DisplayName ?? $"Roster {m.RosterId}",
             CurrentTeamName: owner?.TeamName ?? "",
             PreviousTeamName: null,
-            FinalScore: Math.Round(m.Points ?? 0, 2),
+            FinalScore: Math.Round(m.ScoreOrZero(), 2),
             ProjectedScore: starters.Sum(s => s.ProjectedPoints) is decimal sum && sum > 0 ? Math.Round(sum, 2) : null,
             Starters: starters,
             Bench: bench,
@@ -1040,7 +1047,8 @@ internal sealed class RecapEnvelopeBuilder
             foreach (var m in matchupsByWeek[w])
             {
                 if (!result.ContainsKey(m.RosterId)) continue;
-                result[m.RosterId].Add((decimal)(m.Points ?? 0m));
+                if (m.HasScoringData())
+                    result[m.RosterId].Add(m.ScoreOrZero());
             }
         }
         return result;
@@ -1062,8 +1070,7 @@ internal sealed class RecapEnvelopeBuilder
                 if (pair.Count != 2) continue;
                 var a = pair[0]; var b = pair[1];
                 if (!perWeekResult.ContainsKey(a.RosterId) || !perWeekResult.ContainsKey(b.RosterId)) continue;
-                var aPts = (decimal)(a.Points ?? 0m);
-                var bPts = (decimal)(b.Points ?? 0m);
+                if (!TryGetPlayedScores(a, b, out var aPts, out var bPts)) continue;
                 if (aPts > bPts) { perWeekResult[a.RosterId].Add('W'); perWeekResult[b.RosterId].Add('L'); }
                 else if (bPts > aPts) { perWeekResult[b.RosterId].Add('W'); perWeekResult[a.RosterId].Add('L'); }
                 else { perWeekResult[a.RosterId].Add('T'); perWeekResult[b.RosterId].Add('T'); }
@@ -1086,7 +1093,8 @@ internal sealed class RecapEnvelopeBuilder
         int week,
         List<StandingsRow> standings,
         Dictionary<int, List<decimal>> perWeekPfByRoster,
-        Dictionary<int, OwnerRef> ownerByRosterId)
+        Dictionary<int, OwnerRef> ownerByRosterId,
+        bool persistSnapshot)
     {
         if (standings.Count == 0) return [];
 
@@ -1141,7 +1149,8 @@ internal sealed class RecapEnvelopeBuilder
                 Trend: trend));
         }
 
-        SavePowerHistory(season, week, rows);
+        if (persistSnapshot)
+            SavePowerHistory(season, week, rows);
         return rows;
     }
 
@@ -1211,14 +1220,15 @@ internal sealed class RecapEnvelopeBuilder
         int winnersMaxRound = winners.Count == 0 ? 0 : winners.Max(b => b.Round);
         int losersMaxRound = losers.Count == 0 ? 0 : losers.Max(b => b.Round);
 
-        // Build a lookup: unordered pair of roster ids -> bracket label.
-        var labels = new Dictionary<(int, int), string>();
-        void Add(int? a, int? b, string label)
+        // Build a lookup: unordered pair of roster ids -> bracket context.
+        var labels = new Dictionary<(int, int), (string Label, string SeasonContext, int Importance, string Reason)>();
+        void Add(int? a, int? b, string label, string seasonContext)
         {
             if (a is null || b is null) return;
             int lo = Math.Min(a.Value, b.Value);
             int hi = Math.Max(a.Value, b.Value);
-            labels[(lo, hi)] = label;
+            var (importance, reason) = BracketStoryImportance(label, seasonContext);
+            labels[(lo, hi)] = (label, seasonContext, importance, reason);
         }
 
         // Winners bracket: PlacementRank when present (1 = championship, 3 = 3rd-place); semifinals otherwise.
@@ -1232,7 +1242,7 @@ internal sealed class RecapEnvelopeBuilder
                 _ when winnersMaxRound > 1 && m.Round == winnersMaxRound - 1 => "Semifinal",
                 _ => $"Winners-bracket round {m.Round}"
             };
-            Add(m.Team1, m.Team2, label);
+            Add(m.Team1, m.Team2, label, "playoffs_winners");
         }
 
         // Losers bracket: prefer PlacementRank (5 = consolation final/1.01, 7 = 7th-place game).
@@ -1267,12 +1277,12 @@ internal sealed class RecapEnvelopeBuilder
                 if (bothWon) label = "Consolation final";
                 else if (bothLost) label = "7th-place game";
             }
-            Add(m.Team1, m.Team2, label ?? "Consolation bracket");
+            Add(m.Team1, m.Team2, label ?? "Consolation bracket", "consolation");
         }
         // Earlier-round losers matches.
         foreach (var m in losers.Where(b => b.Round == currentRound && b.Round != losersMaxRound))
         {
-            Add(m.Team1, m.Team2, "Consolation semifinal");
+            Add(m.Team1, m.Team2, "Consolation semifinal", "consolation");
         }
 
         if (labels.Count == 0) return games;
@@ -1282,12 +1292,31 @@ internal sealed class RecapEnvelopeBuilder
         {
             int lo = Math.Min(g.Home.RosterId, g.Away.RosterId);
             int hi = Math.Max(g.Home.RosterId, g.Away.RosterId);
-            if (labels.TryGetValue((lo, hi), out var label))
-                updated.Add(g with { PlayoffRound = label });
+            if (labels.TryGetValue((lo, hi), out var info))
+                updated.Add(g with
+                {
+                    SeasonContext = info.SeasonContext,
+                    PlayoffRound = info.Label,
+                    StoryImportance = info.Importance,
+                    StoryImportanceReason = info.Reason
+                });
             else
                 updated.Add(g);
         }
         return updated;
+
+        static (int Importance, string Reason) BracketStoryImportance(string label, string seasonContext)
+            => label switch
+            {
+                "Championship" => (5, "championship game"),
+                "Semifinal" => (5, "playoff game"),
+                "3rd-place game" => (4, "3rd-place game"),
+                "Consolation final" => (4, "consolation final (1.01 on the line)"),
+                "7th-place game" => (4, "7th-place game (last-place keeper penalty on the line)"),
+                "Consolation semifinal" => (3, "consolation bracket game"),
+                _ when seasonContext == "playoffs_winners" => (5, "playoff game"),
+                _ => (3, "consolation bracket game")
+            };
     }
 
     private static PlayoffPicture BuildPlayoffPicture(
@@ -1297,7 +1326,7 @@ internal sealed class RecapEnvelopeBuilder
         Dictionary<int, OwnerRef> ownerByRosterId,
         List<PlayoffBracketMatch> winners,
         List<PlayoffBracketMatch> losers,
-        List<Matchup> nextWeekMatchups)
+        List<Matchup> currentWeekMatchups)
     {
         int playoffWeekStart = Schedule.PlayoffStartWeek;
         int playoffTeams = 4;
@@ -1361,7 +1390,7 @@ internal sealed class RecapEnvelopeBuilder
             if (inBubbleWindow)
             {
                 int bubbleIdx = playoffTeams - 1; // last in spot
-                foreach (var grp in nextWeekMatchups.GroupBy(m => m.MatchupId))
+                foreach (var grp in currentWeekMatchups.GroupBy(m => m.MatchupId))
                 {
                     var pair = grp.ToList(); if (pair.Count != 2) continue;
                     var aOwner = ownerByRosterId.GetValueOrDefault(pair[0].RosterId);
@@ -1731,6 +1760,13 @@ internal sealed class RecapEnvelopeBuilder
             _ => "Standard"
         };
         return $"{pprLabel}, {passTd:F0}pt passing TD";
+    }
+
+    private static bool TryGetPlayedScores(Matchup a, Matchup b, out decimal aPoints, out decimal bPoints)
+    {
+        aPoints = a.ScoreOrZero();
+        bPoints = b.ScoreOrZero();
+        return a.HasScoringData() || b.HasScoringData();
     }
 
     // ---------------- Weekly theme + previously-on-league ----------------

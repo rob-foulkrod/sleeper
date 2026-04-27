@@ -15,15 +15,18 @@ namespace Sleeper.RosterReport;
 /// </summary>
 internal static class FoundryAgentProvisioner
 {
-    public const string DefaultInstructions =
-        "You are an expert fantasy football analyst. The current date is 2026. " +
-        "When asked about a player, search the web for 2026 fantasy football " +
-        "ADP (average draft position) data, 2026 NFL news, injury reports, " +
+    public static string DefaultInstructions => GetDefaultInstructions(DateTime.UtcNow.Year);
+
+    public static string GetDefaultInstructions(int upcomingSeason)
+        =>
+        $"You are an expert fantasy football analyst. The current date is {DateTime.UtcNow:yyyy-MM-dd}. " +
+        $"When asked about a player, search the web for {upcomingSeason} fantasy football " +
+        $"ADP (average draft position) data, {upcomingSeason} NFL news, injury reports, " +
         "depth chart updates, and offseason moves. " +
-        "IMPORTANT: Only use 2026 ADP and rankings data. Ignore any 2025 or " +
-        "earlier ADP data — those seasons are already completed. " +
+        $"IMPORTANT: Only use {upcomingSeason} ADP and rankings data. Ignore prior-year " +
+        "ADP data — those seasons are already completed. " +
         "Provide concise, data-driven analysis to help fantasy managers " +
-        "evaluate keepers and draft picks for the 2026 season.";
+        $"evaluate keepers and draft picks for the {upcomingSeason} season.";
 
     /// <summary>
     /// Checks whether the named agent exists in the Foundry project.
@@ -36,6 +39,7 @@ internal static class FoundryAgentProvisioner
         string agentName,
         string modelDeployment,
         TokenCredential credential,
+        int? upcomingSeason = null,
         CancellationToken ct = default)
     {
         var projectClient = new AIProjectClient(
@@ -61,7 +65,7 @@ internal static class FoundryAgentProvisioner
 
         var definition = new DeclarativeAgentDefinition(model: modelDeployment)
         {
-            Instructions = DefaultInstructions,
+            Instructions = GetDefaultInstructions(upcomingSeason ?? DateTime.UtcNow.Year),
             Tools = { ResponseTool.CreateWebSearchTool() }
         };
 

@@ -30,6 +30,8 @@ public sealed record RecapEnvelope(
     SeasonOutcome? SeasonOutcome = null
 );
 
+public sealed record RecapEnvelopeBuildOptions(bool PersistSnapshots = true);
+
 /// <summary>
 /// Final season standings + next year's draft order, populated only on the championship week
 /// (week 17) once both brackets have produced winners. Drives the special end-of-season recap

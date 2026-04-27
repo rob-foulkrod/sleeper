@@ -1,8 +1,6 @@
 using Azure;
 using Azure.AI.Extensions.OpenAI;
 using Azure.AI.Projects;
-using Azure.Core;
-using Azure.Identity;
 using OpenAI.Responses;
 using Sleeper.Api.NflData.Analytics;
 
@@ -35,28 +33,10 @@ internal sealed class KeeperSecondOpinionAgent
     /// </summary>
     public static Task<KeeperSecondOpinionAgent?> TryCreateAsync(int upcomingSeason)
     {
-        var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-            ?? Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT");
-        if (string.IsNullOrWhiteSpace(endpoint)) return Task.FromResult<KeeperSecondOpinionAgent?>(null);
-
-        var modelDeployment = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
-
-        try
-        {
-            var credential = new DefaultAzureCredential();
-            var client = new ProjectResponsesClient(
-                new Uri(endpoint),
-                credential,
-                null);
-
-            Console.WriteLine($"  (Keeper Second Opinion: model '{modelDeployment}' with web search)");
-            return Task.FromResult<KeeperSecondOpinionAgent?>(new KeeperSecondOpinionAgent(client, modelDeployment, upcomingSeason));
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"  (AI agent init failed: {ex.GetType().Name}: {ex.Message})");
-            return Task.FromResult<KeeperSecondOpinionAgent?>(null);
-        }
+        var config = FoundryResponsesClientFactory.TryCreate("Keeper Second Opinion");
+        return Task.FromResult(config is null
+            ? null
+            : new KeeperSecondOpinionAgent(config.Client, config.ModelDeployment, upcomingSeason));
     }
 
     public async Task<string> GetSecondOpinionAsync(PlayerAnalysis a, string rankLabel, int lastCompletedSeason, int numTeams = 12, CancellationToken ct = default)
@@ -89,7 +69,7 @@ internal sealed class KeeperSecondOpinionAgent
                 var options = new CreateResponseOptions
                 {
                     Model = _modelDeployment,
-                    Instructions = FoundryAgentProvisioner.DefaultInstructions,
+                    Instructions = FoundryAgentProvisioner.GetDefaultInstructions(_upcomingSeason),
                     Tools = { ResponseTool.CreateWebSearchTool() }
                 };
                 options.InputItems.Add(ResponseItem.CreateUserMessageItem(prompt));

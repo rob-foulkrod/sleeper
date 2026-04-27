@@ -520,7 +520,7 @@ async Task<int> RunPlayerDeepDive(string[] a)
     var seasonHistory = new List<SeasonSummary>();
     var allWeeklyPoints = new Dictionary<int, List<decimal>>();
 
-    for (int y = lastCompleted; y >= lastCompleted - HistoryYears; y--)
+    for (int y = lastCompleted; y > lastCompleted - HistoryYears; y--)
     {
         var seasonStats = await nflData.GetSeasonStatsBySleeperIdAsync(y, "reg");
         var weeklyStats = await nflData.GetWeeklyStatsBySleeperIdAsync(y);

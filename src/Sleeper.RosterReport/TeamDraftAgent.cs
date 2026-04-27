@@ -1,8 +1,6 @@
 using Azure;
 using Azure.AI.Extensions.OpenAI;
 using Azure.AI.Projects;
-using Azure.Core;
-using Azure.Identity;
 using OpenAI.Responses;
 
 #pragma warning disable OPENAI001 // Responses API is in preview
@@ -34,28 +32,10 @@ internal sealed class TeamDraftAgent
     /// </summary>
     public static Task<TeamDraftAgent?> TryCreateAsync(int upcomingSeason)
     {
-        var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-            ?? Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT");
-        if (string.IsNullOrWhiteSpace(endpoint)) return Task.FromResult<TeamDraftAgent?>(null);
-
-        var modelDeployment = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
-
-        try
-        {
-            var credential = new DefaultAzureCredential();
-            var client = new ProjectResponsesClient(
-                new Uri(endpoint),
-                credential,
-                null);
-
-            Console.WriteLine($"  (Team Draft Agent: model '{modelDeployment}' with web search)");
-            return Task.FromResult<TeamDraftAgent?>(new TeamDraftAgent(client, modelDeployment, upcomingSeason));
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"  (Team Draft Agent init failed: {ex.GetType().Name}: {ex.Message})");
-            return Task.FromResult<TeamDraftAgent?>(null);
-        }
+        var config = FoundryResponsesClientFactory.TryCreate("Team Draft Agent");
+        return Task.FromResult(config is null
+            ? null
+            : new TeamDraftAgent(config.Client, config.ModelDeployment, upcomingSeason));
     }
 
     /// <summary>
@@ -93,7 +73,7 @@ internal sealed class TeamDraftAgent
                 var options = new CreateResponseOptions
                 {
                     Model = _modelDeployment,
-                    Instructions = FoundryAgentProvisioner.DefaultInstructions,
+                    Instructions = FoundryAgentProvisioner.GetDefaultInstructions(_upcomingSeason),
                     Tools = { ResponseTool.CreateWebSearchTool() }
                 };
                 options.InputItems.Add(ResponseItem.CreateUserMessageItem(prompt));

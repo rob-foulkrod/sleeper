@@ -8,5 +8,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/Sleeper.Api.IntegrationTests/Sleeper.Api.IntegrationTests.csproj" />
     <Project Path="tests/Sleeper.Api.Tests/Sleeper.Api.Tests.csproj" />
+    <Project Path="tests/Sleeper.RosterReport.Tests/Sleeper.RosterReport.Tests.csproj" />
   </Folder>
 </Solution>
