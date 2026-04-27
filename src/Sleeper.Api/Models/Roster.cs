@@ -10,7 +10,8 @@ public record Roster(
     [property: JsonPropertyName("starters")] List<string>? Starters,
     [property: JsonPropertyName("reserve")] List<string>? Reserve,
     [property: JsonPropertyName("co_owners")] List<string>? CoOwners,
-    [property: JsonPropertyName("settings")] RosterSettings? Settings
+    [property: JsonPropertyName("settings")] RosterSettings? Settings,
+    [property: JsonPropertyName("keepers")] List<string>? Keepers = null
 );
 
 public record RosterSettings(

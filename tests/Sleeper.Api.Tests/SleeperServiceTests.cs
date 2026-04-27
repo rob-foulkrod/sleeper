@@ -355,4 +355,174 @@ public class SleeperServiceTests
         // Should NOT have called previous league drafts
         await client.DidNotReceive().GetLeagueDraftsAsync("lg_prev", Arg.Any<CancellationToken>());
     }
+
+    // -- GetDeclaredKeepersAsync --
+
+    [Fact]
+    public async Task GetDeclaredKeepersAsync_ReturnsAllTeamsWithEmptyKeepers_WhenNoneDeclared()
+    {
+        var (service, client) = Create();
+
+        client.GetLeagueRostersAsync("lg1", Arg.Any<CancellationToken>()).Returns(new List<Roster>
+        {
+            new(1, "u1", "lg1", ["p1"], ["p1"], null, null, null, Keepers: null),
+            new(2, "u2", "lg1", ["p2"], ["p2"], null, null, null, Keepers: new List<string>()),
+        });
+        client.GetLeagueUsersAsync("lg1", Arg.Any<CancellationToken>()).Returns(new List<LeagueUser>
+        {
+            new("u1", "alice", "Alice", null, true, new Dictionary<string, string> { ["team_name"] = "A's" }),
+            new("u2", "bob",   "Bob",   null, true, null),
+        });
+
+        var result = await service.GetDeclaredKeepersAsync("lg1");
+
+        result.Should().HaveCount(2);
+        result.Should().OnlyContain(t => t.Keepers.Count == 0);
+
+        var alice = result.Single(t => t.Username == "alice");
+        alice.DisplayName.Should().Be("Alice");
+        alice.TeamName.Should().Be("A's");
+
+        var bob = result.Single(t => t.Username == "bob");
+        bob.DisplayName.Should().Be("Bob");
+        bob.TeamName.Should().BeNull();
+
+        // No team has keepers => the player catalogue should NOT be downloaded
+        await client.DidNotReceive().GetAllPlayersAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetDeclaredKeepersAsync_ResolvesPlayerIdsToPlayers_WhenAnyTeamDeclared()
+    {
+        var (service, client) = Create();
+
+        client.GetLeagueRostersAsync("lg1", Arg.Any<CancellationToken>()).Returns(new List<Roster>
+        {
+            new(1, "u1", "lg1", ["3086", "SEA", "999"], ["3086"], null, null, null, Keepers: ["3086", "SEA"]),
+            new(2, "u2", "lg1", ["p2"], ["p2"], null, null, null, Keepers: null),
+        });
+        client.GetLeagueUsersAsync("lg1", Arg.Any<CancellationToken>()).Returns(new List<LeagueUser>
+        {
+            new("u1", "alice", "Alice", null, true, new Dictionary<string, string> { ["team_name"] = "A's" }),
+            new("u2", "bob",   "Bob",   null, true, null),
+        });
+        client.GetAllPlayersAsync("nfl", Arg.Any<CancellationToken>()).Returns(new Dictionary<string, Player>
+        {
+            ["3086"] = new Player("3086", "Tom", "Brady", "QB", "NE", 40, "Active", 12, null, null, ["QB"], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null),
+        });
+
+        var result = await service.GetDeclaredKeepersAsync("lg1");
+
+        result.Should().HaveCount(2);
+
+        var alice = result.Single(t => t.Username == "alice");
+        alice.Keepers.Should().HaveCount(2);
+        alice.Keepers.Should().Contain(p => p.PlayerId == "3086" && p.LastName == "Brady");
+        // Team defense should be synthesized
+        alice.Keepers.Should().Contain(p => p.PlayerId == "SEA" && p.Position == "DEF");
+
+        var bob = result.Single(t => t.Username == "bob");
+        bob.Keepers.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetDeclaredKeepersAsync_SkipsUnknownPlayerIds()
+    {
+        var (service, client) = Create();
+
+        client.GetLeagueRostersAsync("lg1", Arg.Any<CancellationToken>()).Returns(new List<Roster>
+        {
+            new(1, "u1", "lg1", ["good", "ghost"], ["good"], null, null, null, Keepers: ["good", "ghost", ""]),
+        });
+        client.GetLeagueUsersAsync("lg1", Arg.Any<CancellationToken>()).Returns(new List<LeagueUser>
+        {
+            new("u1", "alice", "Alice", null, true, null),
+        });
+        client.GetAllPlayersAsync("nfl", Arg.Any<CancellationToken>()).Returns(new Dictionary<string, Player>
+        {
+            ["good"] = new Player("good", "Real", "Guy", "RB", "DET", 25, "Active", 21, null, null, ["RB"], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null),
+        });
+
+        var result = await service.GetDeclaredKeepersAsync("lg1");
+
+        result.Should().HaveCount(1);
+        result[0].Keepers.Should().HaveCount(1);
+        result[0].Keepers[0].PlayerId.Should().Be("good");
+    }
+
+    [Fact]
+    public async Task GetDeclaredKeepersForUserAsync_ReturnsNull_WhenUserNotFound()
+    {
+        var (service, client) = Create();
+        client.GetUserAsync("ghost", Arg.Any<CancellationToken>()).Returns((User?)null);
+
+        var result = await service.GetDeclaredKeepersForUserAsync("lg1", "ghost");
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetDeclaredKeepersForUserAsync_ReturnsNull_WhenUserHasNoRosterInLeague()
+    {
+        var (service, client) = Create();
+        client.GetUserAsync("alice", Arg.Any<CancellationToken>()).Returns(new User("u1", "alice", "Alice", null));
+        client.GetLeagueRostersAsync("lg1", Arg.Any<CancellationToken>()).Returns(new List<Roster>
+        {
+            new(1, "u_other", "lg1", [], [], null, null, null, Keepers: null),
+        });
+
+        var result = await service.GetDeclaredKeepersForUserAsync("lg1", "alice");
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetDeclaredKeepersForUserAsync_ReturnsTeam_WithEmptyKeepers_WhenNoneDeclared()
+    {
+        var (service, client) = Create();
+        client.GetUserAsync("alice", Arg.Any<CancellationToken>()).Returns(new User("u1", "alice", "Alice", null));
+        client.GetLeagueRostersAsync("lg1", Arg.Any<CancellationToken>()).Returns(new List<Roster>
+        {
+            new(1, "u1", "lg1", ["p1"], ["p1"], null, null, null, Keepers: null),
+        });
+        client.GetLeagueUsersAsync("lg1", Arg.Any<CancellationToken>()).Returns(new List<LeagueUser>
+        {
+            new("u1", "alice", "Alice", null, true, new Dictionary<string, string> { ["team_name"] = "A's" }),
+        });
+
+        var result = await service.GetDeclaredKeepersForUserAsync("lg1", "alice");
+
+        result.Should().NotBeNull();
+        result!.RosterId.Should().Be(1);
+        result.Username.Should().Be("alice");
+        result.TeamName.Should().Be("A's");
+        result.Keepers.Should().BeEmpty();
+
+        await client.DidNotReceive().GetAllPlayersAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetDeclaredKeepersForUserAsync_ResolvesDeclaredPlayers()
+    {
+        var (service, client) = Create();
+        client.GetUserAsync("alice", Arg.Any<CancellationToken>()).Returns(new User("u1", "alice", "Alice", null));
+        client.GetLeagueRostersAsync("lg1", Arg.Any<CancellationToken>()).Returns(new List<Roster>
+        {
+            new(1, "u1", "lg1", ["3086"], ["3086"], null, null, null, Keepers: ["3086"]),
+        });
+        client.GetLeagueUsersAsync("lg1", Arg.Any<CancellationToken>()).Returns(new List<LeagueUser>
+        {
+            new("u1", "alice", "Alice", null, true, null),
+        });
+        client.GetAllPlayersAsync("nfl", Arg.Any<CancellationToken>()).Returns(new Dictionary<string, Player>
+        {
+            ["3086"] = new Player("3086", "Tom", "Brady", "QB", "NE", 40, "Active", 12, null, null, ["QB"], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null),
+        });
+
+        var result = await service.GetDeclaredKeepersForUserAsync("lg1", "alice");
+
+        result.Should().NotBeNull();
+        result!.Keepers.Should().ContainSingle();
+        result.Keepers[0].LastName.Should().Be("Brady");
+    }
 }

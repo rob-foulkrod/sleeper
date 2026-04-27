@@ -226,6 +226,102 @@ public class SleeperService : ISleeperService
         }).ToList();
     }
 
+    public async Task<List<DeclaredKeeperTeam>> GetDeclaredKeepersAsync(string leagueId, CancellationToken ct = default)
+    {
+        var rostersTask = _client.GetLeagueRostersAsync(leagueId, ct);
+        var usersTask = _client.GetLeagueUsersAsync(leagueId, ct);
+
+        await Task.WhenAll(rostersTask, usersTask).ConfigureAwait(false);
+
+        var rosters = rostersTask.Result;
+        var users = usersTask.Result;
+        var userMap = users.ToDictionary(u => u.UserId, u => u);
+
+        // Only fetch the player catalogue when at least one team has declared keepers.
+        // For most of the offseason every team's "keepers" is null/empty, so this avoids
+        // a multi-MB download when there's nothing to resolve.
+        var anyKeepers = rosters.Any(r => r.Keepers is { Count: > 0 });
+        Dictionary<string, Player>? allPlayers = anyKeepers
+            ? await _client.GetAllPlayersAsync("nfl", ct).ConfigureAwait(false)
+            : null;
+
+        return rosters.Select(r => BuildDeclaredKeeperTeam(r, userMap, allPlayers)).ToList();
+    }
+
+    public async Task<DeclaredKeeperTeam?> GetDeclaredKeepersForUserAsync(string leagueId, string username, CancellationToken ct = default)
+    {
+        var user = await _client.GetUserAsync(username, ct).ConfigureAwait(false);
+        if (user is null) return null;
+
+        var rosters = await _client.GetLeagueRostersAsync(leagueId, ct).ConfigureAwait(false);
+        var roster = rosters.FirstOrDefault(r => r.OwnerId == user.UserId);
+        if (roster is null) return null;
+
+        var users = await _client.GetLeagueUsersAsync(leagueId, ct).ConfigureAwait(false);
+        var userMap = users.ToDictionary(u => u.UserId, u => u);
+
+        Dictionary<string, Player>? allPlayers = roster.Keepers is { Count: > 0 }
+            ? await _client.GetAllPlayersAsync("nfl", ct).ConfigureAwait(false)
+            : null;
+
+        return BuildDeclaredKeeperTeam(roster, userMap, allPlayers);
+    }
+
+    private static DeclaredKeeperTeam BuildDeclaredKeeperTeam(
+        Roster roster,
+        Dictionary<string, LeagueUser> userMap,
+        Dictionary<string, Player>? allPlayers)
+    {
+        LeagueUser? owner = roster.OwnerId is not null && userMap.TryGetValue(roster.OwnerId, out var u) ? u : null;
+
+        var keepers = new List<Player>();
+        if (allPlayers is not null && roster.Keepers is { Count: > 0 })
+        {
+            foreach (var playerId in roster.Keepers)
+            {
+                if (string.IsNullOrWhiteSpace(playerId)) continue;
+                if (allPlayers.TryGetValue(playerId, out var p))
+                {
+                    keepers.Add(p);
+                }
+                else if (IsTeamDefense(playerId))
+                {
+                    keepers.Add(SynthesizeDefense(playerId));
+                }
+            }
+        }
+
+        return new DeclaredKeeperTeam(
+            RosterId: roster.RosterId,
+            OwnerId: roster.OwnerId,
+            Username: owner?.Username,
+            DisplayName: owner?.DisplayName ?? owner?.Username,
+            TeamName: owner?.Metadata?.GetValueOrDefault("team_name"),
+            Keepers: keepers
+        );
+    }
+
+    private static Player SynthesizeDefense(string teamAbbr) =>
+        new(
+            PlayerId: teamAbbr,
+            FirstName: teamAbbr,
+            LastName: "DEF",
+            Position: "DEF",
+            Team: teamAbbr,
+            Age: null, Status: "Active", Number: null,
+            College: null, YearsExp: null,
+            FantasyPositions: ["DEF"],
+            InjuryStatus: null, Weight: null, Height: null,
+            SearchFullName: $"{teamAbbr.ToLowerInvariant()}def",
+            SearchFirstName: teamAbbr.ToLowerInvariant(),
+            SearchLastName: "def",
+            SearchRank: null, DepthChartPosition: null, DepthChartOrder: null,
+            Sport: "nfl", Hashtag: null, FantasyDataId: null,
+            BirthCountry: null, EspnId: null, YahooId: null,
+            RotowireId: null, RotoworldId: null, SportradarId: null,
+            PracticeParticipation: null, InjuryStartDate: null
+        );
+
     // Helpers
 
     private static readonly HashSet<string> NflTeamAbbreviations = new(StringComparer.OrdinalIgnoreCase)

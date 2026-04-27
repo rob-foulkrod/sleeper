@@ -1,4 +1,7 @@
+using Azure;
 using Azure.AI.Extensions.OpenAI;
+using Azure.AI.Projects;
+using Azure.Core;
 using Azure.Identity;
 using OpenAI.Responses;
 using Sleeper.Api.NflData.Analytics;
@@ -11,22 +14,23 @@ namespace Sleeper.RosterReport;
 /// Uses Azure AI Foundry Responses API to invoke a server-side agent
 /// that provides a "second opinion" on each top-10 keeper recommendation,
 /// confirming or countering the statistical analysis using recent NFL news.
-/// The agent must already exist in the Foundry portal.
 /// </summary>
 internal sealed class KeeperSecondOpinionAgent
 {
     private readonly ProjectResponsesClient _responsesClient;
+    private readonly string _modelDeployment;
     private readonly int _upcomingSeason;
 
-    private KeeperSecondOpinionAgent(ProjectResponsesClient responsesClient, int upcomingSeason)
+    private KeeperSecondOpinionAgent(ProjectResponsesClient responsesClient, string modelDeployment, int upcomingSeason)
     {
         _responsesClient = responsesClient;
+        _modelDeployment = modelDeployment;
         _upcomingSeason = upcomingSeason;
     }
 
     /// <summary>
     /// Try to build the agent from environment configuration.
-    /// Connects to an existing Foundry agent by name/version using the Responses API.
+    /// Uses a ProjectResponsesClient with web search tool for per-request AI lookups.
     /// Returns null if required env vars are not set or connection fails.
     /// </summary>
     public static Task<KeeperSecondOpinionAgent?> TryCreateAsync(int upcomingSeason)
@@ -35,16 +39,18 @@ internal sealed class KeeperSecondOpinionAgent
             ?? Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT");
         if (string.IsNullOrWhiteSpace(endpoint)) return Task.FromResult<KeeperSecondOpinionAgent?>(null);
 
-        var agentName = Environment.GetEnvironmentVariable("FOUNDRY_AGENT_NAME") ?? "ffanalysts";
-        var agentVersion = Environment.GetEnvironmentVariable("FOUNDRY_AGENT_VERSION") ?? "2";
+        var modelDeployment = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
 
         try
         {
-            var agentRef = new AgentReference(name: agentName, version: agentVersion);
-            var responsesClient = new ProjectResponsesClient(
-                new Uri(endpoint), new DefaultAzureCredential(), agentRef);
-            Console.WriteLine($"  (Using Foundry agent '{agentName}' v{agentVersion} via Responses API)");
-            return Task.FromResult<KeeperSecondOpinionAgent?>(new KeeperSecondOpinionAgent(responsesClient, upcomingSeason));
+            var credential = new DefaultAzureCredential();
+            var client = new ProjectResponsesClient(
+                new Uri(endpoint),
+                credential,
+                null);
+
+            Console.WriteLine($"  (Keeper Second Opinion: model '{modelDeployment}' with web search)");
+            return Task.FromResult<KeeperSecondOpinionAgent?>(new KeeperSecondOpinionAgent(client, modelDeployment, upcomingSeason));
         }
         catch (Exception ex)
         {
@@ -53,13 +59,15 @@ internal sealed class KeeperSecondOpinionAgent
         }
     }
 
-    public async Task<string> GetSecondOpinionAsync(PlayerAnalysis a, string rankLabel, int lastCompletedSeason, CancellationToken ct = default)
+    public async Task<string> GetSecondOpinionAsync(PlayerAnalysis a, string rankLabel, int lastCompletedSeason, int numTeams = 12, CancellationToken ct = default)
     {
+        var keeperPickEst = a.KeeperCostRound.HasValue ? (a.KeeperCostRound.Value - 1) * numTeams + numTeams / 2 : 0;
         var trend = $"{a.TrendDirection} ({a.TrendPerYear:+0.0;-0.0} PPG/yr)";
         var prompt =
             $"Player: {a.PlayerName} ({a.Position}, age {a.Age?.ToString() ?? "?"})\n" +
             $"Upcoming season: {_upcomingSeason}\n" +
-            $"Keeper cost: Round {a.KeeperCostRound}\n" +
+            $"League: {numTeams}-team league\n" +
+            $"Keeper cost: Round {a.KeeperCostRound} (~Pick {keeperPickEst} in a {numTeams}-team draft)\n" +
             $"Stat profile ({lastCompletedSeason} and prior):\n" +
             $"- Last-season rank: {rankLabel}\n" +
             $"- Weighted PPG: {a.WeightedPpg:F1}, Age-adjusted PPG: {a.AgeAdjustedPpg:F1}\n" +
@@ -68,7 +76,9 @@ internal sealed class KeeperSecondOpinionAgent
             $"- Trend: {trend}\n" +
             $"- Durability: {a.DurabilityPct:F0}%, Consistency: {a.ConsistencyScore:F0}/100\n" +
             $"- Grade: {a.KeeperGrade}, Score: {a.KeeperScore:F1}\n\n" +
-            "Search the web for recent news on this player and give a 2-4 sentence CONFIRM/COUNTER/CAUTION verdict.";
+            $"Search the web for {_upcomingSeason} news and {_upcomingSeason} ADP data on this player. " +
+            $"Only use {_upcomingSeason} data — ignore prior-year ADP as those seasons are completed. " +
+            "Give a 2-4 sentence CONFIRM/COUNTER/CAUTION verdict.";
 
         // Retry on HTTP 429 rate-limit with exponential backoff
         var delays = new[] { TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(60) };
@@ -76,7 +86,14 @@ internal sealed class KeeperSecondOpinionAgent
         {
             try
             {
-                ResponseResult response = await _responsesClient.CreateResponseAsync(prompt, cancellationToken: ct);
+                var options = new CreateResponseOptions
+                {
+                    Model = _modelDeployment,
+                    Instructions = FoundryAgentProvisioner.DefaultInstructions,
+                    Tools = { ResponseTool.CreateWebSearchTool() }
+                };
+                options.InputItems.Add(ResponseItem.CreateUserMessageItem(prompt));
+                ResponseResult response = await _responsesClient.CreateResponseAsync(options, cancellationToken: ct);
                 return response.GetOutputText()?.Trim() ?? "(no response)";
             }
             catch (Exception ex) when (attempt < delays.Length && IsRateLimit(ex))

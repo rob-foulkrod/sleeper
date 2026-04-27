@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Sleeper.Api/Sleeper.Api.csproj" />
+    <Project Path="src/Sleeper.Host/Sleeper.Host.csproj" />
     <Project Path="src/Sleeper.McpServer/Sleeper.McpServer.csproj" />
     <Project Path="src/Sleeper.RosterReport/Sleeper.RosterReport.csproj" />
   </Folder>

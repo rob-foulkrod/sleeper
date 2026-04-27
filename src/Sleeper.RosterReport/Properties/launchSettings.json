@@ -1,13 +1,7 @@
 {
   "profiles": {
     "Sleeper.RosterReport": {
-      "commandName": "Project",
-      "environmentVariables": {
-        "AZURE_OPENAI_ENDPOINT": "https://me-6535-resource.services.ai.azure.com/api/projects/me-6535",
-        "AZURE_OPENAI_DEPLOYMENT_NAME": "gpt-5.4",
-        "FOUNDRY_AGENT_NAME": "ffanalysts",
-        "FOUNDRY_AGENT_VERSION": "2"
-      }
+      "commandName": "Project"
     }
   }
 }
