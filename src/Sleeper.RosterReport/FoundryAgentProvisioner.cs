@@ -1,9 +1,8 @@
-using Azure;
-using Azure.AI.Extensions.OpenAI;
 using Azure.AI.Projects;
 using Azure.AI.Projects.Agents;
-using Azure.Core;
+using Microsoft.Agents.AI;
 using OpenAI.Responses;
+using System.ClientModel;
 
 #pragma warning disable OPENAI001 // Responses API is in preview
 
@@ -18,15 +17,7 @@ internal static class FoundryAgentProvisioner
     public static string DefaultInstructions => GetDefaultInstructions(DateTime.UtcNow.Year);
 
     public static string GetDefaultInstructions(int upcomingSeason)
-        =>
-        $"You are an expert fantasy football analyst. The current date is {DateTime.UtcNow:yyyy-MM-dd}. " +
-        $"When asked about a player, search the web for {upcomingSeason} fantasy football " +
-        $"ADP (average draft position) data, {upcomingSeason} NFL news, injury reports, " +
-        "depth chart updates, and offseason moves. " +
-        $"IMPORTANT: Only use {upcomingSeason} ADP and rankings data. Ignore prior-year " +
-        "ADP data — those seasons are already completed. " +
-        "Provide concise, data-driven analysis to help fantasy managers " +
-        $"evaluate keepers and draft picks for the {upcomingSeason} season.";
+        => FoundryAgentInstructions.PlayerResearch(upcomingSeason);
 
     /// <summary>
     /// Checks whether the named agent exists in the Foundry project.
@@ -34,46 +25,53 @@ internal static class FoundryAgentProvisioner
     /// Uses TokenCredential (e.g. DefaultAzureCredential) — API key auth
     /// is not supported by AIProjectClient.
     /// </summary>
-    public static async Task EnsureAgentExistsAsync(
-        string projectEndpoint,
+    public static async Task<AIAgent> GetOrCreateAgentAsync(
+        AIProjectClient projectClient,
         string agentName,
         string modelDeployment,
-        TokenCredential credential,
-        int? upcomingSeason = null,
+        string instructions,
+        string description,
+        bool enableWebSearch,
+        bool allowCreate,
+        FoundryAgentRole role,
         CancellationToken ct = default)
     {
-        var projectClient = new AIProjectClient(
-            endpoint: new Uri(projectEndpoint),
-            tokenProvider: credential);
-
         var admin = projectClient.AgentAdministrationClient;
 
-        // Check if agent already exists
         try
         {
-            await admin.GetAgentAsync(agentName, ct);
+            var existing = await admin.GetAgentAsync(agentName, ct).ConfigureAwait(false);
             Console.WriteLine($"  (Foundry agent '{agentName}' found)");
-            return;
+            return projectClient.AsAIAgent(existing.Value);
         }
-        catch (RequestFailedException ex) when (ex.Status == 404)
+        catch (ClientResultException ex) when (ex.Status == 404)
         {
-            // Agent doesn't exist – create below
+            if (!allowCreate)
+                throw new InvalidOperationException($"Foundry agent '{agentName}' was not found and automatic creation is disabled.", ex);
         }
 
-        // Create the agent with web search tool
-        Console.WriteLine($"  (Foundry agent '{agentName}' not found – creating...)");
+        Console.WriteLine($"  (Foundry agent '{agentName}' not found; creating server-side agent...)");
 
         var definition = new DeclarativeAgentDefinition(model: modelDeployment)
         {
-            Instructions = GetDefaultInstructions(upcomingSeason ?? DateTime.UtcNow.Year),
-            Tools = { ResponseTool.CreateWebSearchTool() }
+            Instructions = instructions
         };
+        if (enableWebSearch)
+            definition.Tools.Add(ResponseTool.CreateWebSearchTool());
+
+        var options = new ProjectsAgentVersionCreationOptions(definition)
+        {
+            Description = description
+        };
+        options.Metadata.Add("app", "Sleeper.RosterReport");
+        options.Metadata.Add("role", role.ToString());
 
         var created = await admin.CreateAgentVersionAsync(
             agentName: agentName,
-            options: new(definition),
+            options: options,
             cancellationToken: ct);
 
         Console.WriteLine($"  (Created Foundry agent '{agentName}' v{created.Value.Version})");
+        return projectClient.AsAIAgent(created.Value);
     }
 }

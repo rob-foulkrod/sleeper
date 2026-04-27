@@ -6,6 +6,9 @@
 # dotenv files
 .env
 
+# Local application configuration
+src/Sleeper.RosterReport/appsettings.Development.json
+
 # User-specific files
 *.rsuser
 *.suo

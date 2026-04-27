@@ -14,18 +14,14 @@ using Sleeper.RosterReport.Recap;
 const string DefaultLeagueId = "1312539280601522176";
 const int HistoryYears = 3;
 
-// Load configuration: environment vars + user secrets (dev only)
-var config = new ConfigurationBuilder()
-    .AddEnvironmentVariables()
+var configuration = new ConfigurationBuilder()
+    .SetBasePath(AppContext.BaseDirectory)
+    .AddJsonFile("appsettings.json", optional: true)
+    .AddJsonFile("appsettings.Development.json", optional: true)
     .AddUserSecrets<Program>(optional: true)
+    .AddEnvironmentVariables()
     .Build();
-
-// Populate environment variables from user secrets so agents pick them up
-foreach (var kvp in config.AsEnumerable())
-{
-    if (kvp.Value is not null && Environment.GetEnvironmentVariable(kvp.Key) is null)
-        Environment.SetEnvironmentVariable(kvp.Key, kvp.Value);
-}
+var foundrySettings = FoundryAgentSettings.FromConfiguration(configuration);
 
 if (args.Length == 0)
 {
@@ -254,12 +250,11 @@ async Task<int> RunKeeperAnalyzer(string[] a)
     Console.WriteLine($"  TOP {TopCandidates} KEEPER CANDIDATES (you keep {config.MaxKeepers} -- your call)");
     Console.WriteLine("-----------------------------------------------------------------------------------");
 
-    // Try to build the AI second-opinion agent (requires AZURE_OPENAI_ENDPOINT)
-    var secondOpinionAgent = await KeeperSecondOpinionAgent.TryCreateAsync(currentSeason);
+    var secondOpinionAgent = await KeeperSecondOpinionAgent.TryCreateAsync(foundrySettings, currentSeason);
     if (secondOpinionAgent is null)
     {
         Console.WriteLine();
-        Console.WriteLine("  (AI second opinion disabled -- set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT_NAME to enable)");
+        Console.WriteLine($"  (AI second opinion disabled -- {foundrySettings.MissingConfigurationMessage})");
     }
 
     for (int i = 0; i < recommended.Count; i++)
@@ -665,11 +660,10 @@ async Task<int> RunTeamDeepDive(string[] a)
         leagueConfig.Teams, leagueConfig.StarterSlots, leagueConfig.FlexSlots);
     var keeperAnalyzer = new KeeperAnalyzer(replacementLevels);
 
-    // Try to build the AI draft-outlook agent
-    var draftAgent = await TeamDraftAgent.TryCreateAsync(currentSeason);
+    var draftAgent = await TeamDraftAgent.TryCreateAsync(foundrySettings, currentSeason);
     if (draftAgent is null)
     {
-        Console.WriteLine("  (AI draft outlook disabled -- set AZURE_OPENAI_ENDPOINT to enable)");
+        Console.WriteLine($"  (AI draft outlook disabled -- {foundrySettings.MissingConfigurationMessage})");
     }
 
     // Sort players: starters first (by position order), then bench
@@ -916,12 +910,12 @@ async Task<int> RunWeeklyRecap(string[] a)
 
     Console.WriteLine($"  envelope: {envelope.Owners.Count} owners, {envelope.Games.Count} games, {envelope.Themes.WaiverGrades.Count} waivers, {envelope.Themes.Trades.Count} trades, {envelope.AgentFetchHints.Count} fetch hints");
 
-    var agent = RecapAgent.TryCreate();
+    var agent = await RecapAgent.TryCreateAsync(foundrySettings);
     string output;
     if (agent is null)
     {
         Console.WriteLine();
-        Console.WriteLine("  (AI recap disabled -- set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT_NAME to enable)");
+        Console.WriteLine($"  (AI recap disabled -- {foundrySettings.MissingConfigurationMessage})");
         Console.WriteLine("  (writing data-only envelope dump for debugging)");
         output = DumpEnvelopeAsMarkdown(envelope);
     }
@@ -983,12 +977,12 @@ async Task<int> RunSeasonRecap(string[] a)
     Console.WriteLine($"  Loaded {digests.Count} weekly digests from disk");
 
     // Run the agent.
-    var agent = SeasonAgent.TryCreate();
+    var agent = await SeasonAgent.TryCreateAsync(foundrySettings);
     string proseBody = "";
     if (agent is null)
     {
         Console.WriteLine();
-        Console.WriteLine("  (Season agent disabled -- set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT_NAME to enable the prose pass)");
+        Console.WriteLine($"  (Season agent disabled -- {foundrySettings.MissingConfigurationMessage})");
     }
     else
     {

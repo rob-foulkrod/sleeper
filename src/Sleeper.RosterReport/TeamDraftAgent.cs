@@ -1,7 +1,4 @@
-using Azure;
-using Azure.AI.Extensions.OpenAI;
-using Azure.AI.Projects;
-using OpenAI.Responses;
+using Microsoft.Agents.AI;
 
 #pragma warning disable OPENAI001 // Responses API is in preview
 
@@ -14,28 +11,32 @@ namespace Sleeper.RosterReport;
 /// </summary>
 internal sealed class TeamDraftAgent
 {
-    private readonly ProjectResponsesClient _responsesClient;
-    private readonly string _modelDeployment;
+    private readonly AIAgent _agent;
+    private readonly string _agentName;
     private readonly int _upcomingSeason;
 
-    private TeamDraftAgent(ProjectResponsesClient responsesClient, string modelDeployment, int upcomingSeason)
+    private TeamDraftAgent(AIAgent agent, string agentName, int upcomingSeason)
     {
-        _responsesClient = responsesClient;
-        _modelDeployment = modelDeployment;
+        _agent = agent;
+        _agentName = agentName;
         _upcomingSeason = upcomingSeason;
     }
 
     /// <summary>
-    /// Try to build the agent from environment configuration.
-    /// Uses a ProjectResponsesClient with web search tool for per-request AI lookups.
-    /// Returns null if required env vars are not set or connection fails.
+    /// Try to build the agent from Foundry configuration.
+    /// Uses a server-side Foundry agent with web search enabled.
+    /// Returns null if required configuration is not set or connection fails.
     /// </summary>
-    public static Task<TeamDraftAgent?> TryCreateAsync(int upcomingSeason)
+    public static async Task<TeamDraftAgent?> TryCreateAsync(FoundryAgentSettings settings, int upcomingSeason)
     {
-        var config = FoundryResponsesClientFactory.TryCreate("Team Draft Agent");
-        return Task.FromResult(config is null
+        var runtime = await FoundryAgentFactory.TryCreateAsync(
+            settings,
+            FoundryAgentRole.TeamDraftOutlook,
+            FoundryAgentInstructions.PlayerResearch(upcomingSeason),
+            enableWebSearch: true).ConfigureAwait(false);
+        return runtime is null
             ? null
-            : new TeamDraftAgent(config.Client, config.ModelDeployment, upcomingSeason));
+            : new TeamDraftAgent(runtime.Agent, runtime.AgentName, upcomingSeason);
     }
 
     /// <summary>
@@ -70,15 +71,8 @@ internal sealed class TeamDraftAgent
         {
             try
             {
-                var options = new CreateResponseOptions
-                {
-                    Model = _modelDeployment,
-                    Instructions = FoundryAgentProvisioner.GetDefaultInstructions(_upcomingSeason),
-                    Tools = { ResponseTool.CreateWebSearchTool() }
-                };
-                options.InputItems.Add(ResponseItem.CreateUserMessageItem(prompt));
-                ResponseResult response = await _responsesClient.CreateResponseAsync(options, cancellationToken: ct);
-                return response.GetOutputText()?.Trim() ?? "(no response)";
+                var response = await _agent.RunAsync(prompt, cancellationToken: ct).ConfigureAwait(false);
+                return response.Text?.Trim() ?? "(no response)";
             }
             catch (Exception ex) when (attempt < delays.Length && IsRateLimit(ex))
             {

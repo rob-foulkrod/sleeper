@@ -1,7 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using Azure.AI.Projects;
-using Azure.Identity;
 using Microsoft.Agents.AI;
 
 namespace Sleeper.RosterReport.Recap;
@@ -30,36 +28,26 @@ internal sealed class RecapAgent
         _model = model;
     }
 
-    public static RecapAgent? TryCreate()
+    public static async Task<RecapAgent?> TryCreateAsync(FoundryAgentSettings settings, CancellationToken ct = default)
     {
-        var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-            ?? Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT");
-        if (string.IsNullOrWhiteSpace(endpoint)) return null;
-        var deployment = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
+        var gameAgent = await FoundryAgentFactory.TryCreateAsync(
+            settings,
+            FoundryAgentRole.WeeklyGameAnalyst,
+            FoundryAgentInstructions.WeeklyGameAnalyst,
+            enableWebSearch: false,
+            ct).ConfigureAwait(false);
+        var leagueAgent = await FoundryAgentFactory.TryCreateAsync(
+            settings,
+            FoundryAgentRole.WeeklyLeagueAnalyst,
+            FoundryAgentInstructions.WeeklyLeagueAnalyst,
+            enableWebSearch: false,
+            ct).ConfigureAwait(false);
 
-        try
-        {
-            var credential = new DefaultAzureCredential();
-            var project = new AIProjectClient(new Uri(endpoint), credential);
-
-            AIAgent gameAgent = project.AsAIAgent(
-                model: deployment,
-                name: "GameAnalyst",
-                instructions: GameAnalystInstructions);
-
-            AIAgent leagueAgent = project.AsAIAgent(
-                model: deployment,
-                name: "LeagueAnalyst",
-                instructions: LeagueAnalystInstructions);
-
-            Console.WriteLine($"  (Recap Agents online: model '{deployment}', game + league analysts)");
-            return new RecapAgent(gameAgent, leagueAgent, deployment);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"  (Recap Agent init failed: {ex.GetType().Name}: {ex.Message})");
+        if (gameAgent is null || leagueAgent is null)
             return null;
-        }
+
+        Console.WriteLine($"  (Recap Agents online: game + league Foundry agents)");
+        return new RecapAgent(gameAgent.Agent, leagueAgent.Agent, gameAgent.ModelDeployment);
     }
 
     public async Task<string> WriteRecapAsync(RecapEnvelope env, int maxConcurrency = 3, CancellationToken ct = default)
@@ -834,31 +822,6 @@ internal sealed class RecapAgent
     }
 
     // ----------------- Prompts -----------------
-
-    private const string GameAnalystInstructions =
-        "You are a veteran fantasy football columnist writing one short matchup recap as part of a larger weekly column. " +
-        "VOICE: Mike Tirico calling NBC Sunday Night Football — calm, measured, professional, generous with credit, never breathless. Set the scene first, hand off to the numbers, let a single sharp observation do the work that a lesser writer would pile three adjectives on. Use restrained transitions ('Meanwhile,' 'On the other side,' 'And yet,'). Avoid hype words like 'thriller', 'showdown', 'electrifying', 'lit up the field' — Tirico would never. Short declarative sentences mixed with one well-built compound sentence per paragraph. Treat owners with respect; treat players as the professionals they are. " +
-        "Voice rules: " +
-        "(1) Head-to-head sports column. Refer to the two competitors primarily by their TEAM NAMES; the owner's real name is fine for color but should not dominate. " +
-        "(2) The only owner decisions you may attribute are start/sit, waivers, and trades. No fictional coaches, no locker-room moments, no in-game adjustments. " +
-        "(3) Players are real NFL players — attribute them to their real NFL teams when it serves the prose. " +
-        "(4) Never invent numbers; use only what is in the JSON. " +
-        "(5) Never manufacture betting lines, spreads, or over/unders — those are reserved for the look-ahead section, written separately. " +
-        "(6) FAMILY-RIVALRY RESTRAINT: If a story hook is explicitly provided in the prompt, you may reference it once, briefly, in the headline or first paragraph. Do NOT keep returning to 'father vs son', 'family bragging rights', or 'dinner-table' framing throughout the piece — the audience already knows. If NO hook is provided, write a straight matchup recap with zero family-rivalry framing. " +
-        "(7) NAMES RULE: refer to each owner only by their real name (e.g. 'Rob', 'Rob Foulkrod') or their team name (e.g. 'Unstoppable Farce'). Never use internal Sleeper usernames (lowercase handles like 'robfoulk', 'jfoulkrod', 'asmartaleck1', 'ebmookie', 'mafoulk', 'NOTDoda', 'Evenkeel75', 'Dbfoulkrod') in your prose — those are database keys, not names a human would write.";
-
-    private const string LeagueAnalystInstructions =
-        "You are a veteran fantasy football columnist writing the league-wide sections of a weekly column (intro, themes, look-ahead, predictions). " +
-        "VOICE: Mike Tirico calling NBC Sunday Night Football — calm, measured, professional, generous with credit, never breathless. Set up storylines without hype, then let a single sharp observation land. Avoid 'thriller', 'showdown', 'electrifying', 'lit up the field'. Short declarative sentences mixed with one well-built compound per paragraph. " +
-        "Voice rules: " +
-        "(1) Head-to-head sports column. " +
-        "(2) The only owner decisions you may attribute are start/sit, waivers, and trades. No fictional coaches or locker-room moments. " +
-        "(3) Use the JSON sections faithfully. Never invent numbers. " +
-        "(4) In the Look-Ahead section AND ONLY THERE, you MAY manufacture a fictional betting line per next-week matchup, framed as 'the columnist's line' (spread + over/under). Never present them as real sportsbook numbers. " +
-        "(5) Predictions must be falsifiable — specific outcomes a future recap can score — and must NOT contradict your own Forecast picks or each other. If you predict team A wins, do not also predict team B wins the same game. " +
-        "(6) Reference prior-recap predictions when present and grade them honestly. " +
-        "(7) FAMILY-RIVALRY RESTRAINT: at most one brief callout per week. Do not lead every paragraph with family framing. Lean on team names, scores, players, and standings. " +
-        "(8) NAMES RULE: refer to each owner only by their real name (e.g. 'Rob', 'Rob Foulkrod') or their team name (e.g. 'Unstoppable Farce'). Never use internal Sleeper usernames in your prose — those are database keys, not names a human would write.";
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {

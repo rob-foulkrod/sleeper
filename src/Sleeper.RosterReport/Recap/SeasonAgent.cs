@@ -1,8 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Azure.AI.Projects;
-using Azure.Identity;
 using Microsoft.Agents.AI;
 
 namespace Sleeper.RosterReport.Recap;
@@ -25,34 +23,20 @@ internal sealed class SeasonAgent
         _model = model;
     }
 
-    public static SeasonAgent? TryCreate()
+    public static async Task<SeasonAgent?> TryCreateAsync(FoundryAgentSettings settings, CancellationToken ct = default)
     {
-        var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-            ?? Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT");
-        if (string.IsNullOrWhiteSpace(endpoint)) return null;
-        // Prefer a season-specific deployment when set — the season recap is a single annual call
-        // with a much larger prompt than the weekly pipeline, so it's the natural place to spend
-        // a stronger (and pricier) model. Falls back to the shared deployment if not configured.
-        var deployment = Environment.GetEnvironmentVariable("AZURE_OPENAI_SEASON_DEPLOYMENT_NAME")
-            ?? Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME")
-            ?? "gpt-4o-mini";
+        var runtime = await FoundryAgentFactory.TryCreateAsync(
+            settings,
+            FoundryAgentRole.SeasonAnalyst,
+            FoundryAgentInstructions.SeasonAnalyst,
+            enableWebSearch: false,
+            ct).ConfigureAwait(false);
 
-        try
-        {
-            var credential = new DefaultAzureCredential();
-            var project = new AIProjectClient(new Uri(endpoint), credential);
-            AIAgent agent = project.AsAIAgent(
-                model: deployment,
-                name: "SeasonAnalyst",
-                instructions: SeasonAnalystInstructions);
-            Console.WriteLine($"  (Season Agent online: model '{deployment}')");
-            return new SeasonAgent(agent, deployment);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"  (Season Agent init failed: {ex.GetType().Name}: {ex.Message})");
+        if (runtime is null)
             return null;
-        }
+
+        Console.WriteLine($"  (Season Agent online: Foundry agent '{runtime.AgentName}', model '{runtime.ModelDeployment}')");
+        return new SeasonAgent(runtime.Agent, runtime.ModelDeployment);
     }
 
     /// <summary>
@@ -222,17 +206,6 @@ internal sealed class SeasonAgent
         List<(SeasonTeamSeries Team, int Weeks)> Top1Weeks,
         List<(SeasonTeamSeries Team, decimal Diff)> DifferentialLeaderboard);
 
-    private const string SeasonAnalystInstructions =
-        "You are a veteran fantasy football columnist writing the season-in-review column for an 8-team family league. " +
-        "VOICE: Mike Tirico calling NBC Sunday Night Football — calm, measured, professional, generous with credit, never breathless. Set up storylines without hype, then let a single sharp observation land. Avoid 'thriller', 'showdown', 'electrifying', 'lit up the field'. Short declarative sentences mixed with one well-built compound per paragraph. " +
-        "Voice rules: " +
-        "(1) Head-to-head sports column. Refer to the eight competitors primarily by their team names; the owner's real name is fine for color but should not dominate. " +
-        "(2) The only owner decisions you may attribute are start/sit, waivers, and trades. No fictional coaches, no in-game adjustments. " +
-        "(3) Use the JSON sections faithfully. Never invent numbers, scores, or player stats. " +
-        "(4) FAMILY-RIVALRY RESTRAINT: at most one or two brief callouts across the whole document. The audience knows they're related. " +
-        "(5) NAMES RULE: refer to each owner only by their real name or their team name. Never use internal Sleeper usernames in your prose. " +
-        "(6) DETERMINISTIC AWARDS: the awards list is pre-computed by the engine. You NARRATE the winners; you do not select different winners or add new awards. " +
-        "(7) NO META: do not say 'this column will cover' or 'in this section we'll see'. Just write.";
 }
 
 /// <summary>
