@@ -28,9 +28,9 @@ public class SleeperService : ISleeperService
 
         await Task.WhenAll(matchupsTask, rostersTask, usersTask).ConfigureAwait(false);
 
-        var matchups = matchupsTask.Result;
-        var rosters = rostersTask.Result;
-        var users = usersTask.Result;
+        var matchups = await matchupsTask.ConfigureAwait(false);
+        var rosters = await rostersTask.ConfigureAwait(false);
+        var users = await usersTask.ConfigureAwait(false);
 
         var ownerMap = BuildOwnerMap(rosters, users);
 
@@ -87,8 +87,8 @@ public class SleeperService : ISleeperService
 
         await Task.WhenAll(rostersTask, usersTask).ConfigureAwait(false);
 
-        var rosters = rostersTask.Result;
-        var users = usersTask.Result;
+        var rosters = await rostersTask.ConfigureAwait(false);
+        var users = await usersTask.ConfigureAwait(false);
         var userMap = users.ToDictionary(u => u.UserId, u => u);
 
         return rosters.Select(r =>
@@ -233,8 +233,8 @@ public class SleeperService : ISleeperService
 
         await Task.WhenAll(rostersTask, usersTask).ConfigureAwait(false);
 
-        var rosters = rostersTask.Result;
-        var users = usersTask.Result;
+        var rosters = await rostersTask.ConfigureAwait(false);
+        var users = await usersTask.ConfigureAwait(false);
         var userMap = users.ToDictionary(u => u.UserId, u => u);
 
         // Only fetch the player catalogue when at least one team has declared keepers.

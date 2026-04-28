@@ -31,6 +31,39 @@ public class CachedSleeperClientTests
     }
 
     [Fact]
+    public async Task GetUserAsync_DoesNotCacheNullResult()
+    {
+        var (cached, inner) = Create();
+        var user = new User("1", "missing", "Missing", null);
+        inner.GetUserAsync("missing", Arg.Any<CancellationToken>()).Returns((User?)null, user);
+
+        var first = await cached.GetUserAsync("missing");
+        var second = await cached.GetUserAsync("missing");
+
+        first.Should().BeNull();
+        second.Should().BeSameAs(user);
+        await inner.Received(2).GetUserAsync("missing", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetUserAsync_ThrowsOperationCanceled_WhenCancellationRequestedBeforeCacheHit()
+    {
+        var (cached, inner) = Create();
+        var user = new User("1", "test", "Test", null);
+        inner.GetUserAsync("test", Arg.Any<CancellationToken>()).Returns(user);
+
+        await cached.GetUserAsync("test");
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        Func<Task> act = async () => await cached.GetUserAsync("test", cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        await inner.Received(1).GetUserAsync("test", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task GetLeagueAsync_CachesResult()
     {
         var (cached, inner) = Create();

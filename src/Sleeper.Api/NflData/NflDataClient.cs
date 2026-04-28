@@ -3,6 +3,7 @@ using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using Sleeper.Api.Caching;
 using Sleeper.Api.NflData.Models;
 
 namespace Sleeper.Api.NflData;
@@ -32,19 +33,19 @@ public class NflDataClient : INflDataClient
     {
         var url = $"{_options.StatsBaseUrl}stats_player_week_{season}.csv";
         var ttl = IsCurrentOrFutureSeason(season) ? _options.CurrentSeasonCacheTtl : _options.HistoricalCacheTtl;
-        return GetOrCreateAsync($"nfl-weekly:{season}", ttl, () => DownloadCsvAsync<WeeklyPlayerStats>(url, ct));
+        return GetOrCreateAsync($"nfl-weekly:{season}", ttl, () => DownloadCsvAsync<WeeklyPlayerStats>(url, ct), ct);
     }
 
     public Task<List<SeasonPlayerStats>> GetSeasonStatsAsync(int season, string seasonType = "reg", CancellationToken ct = default)
     {
         var url = $"{_options.StatsBaseUrl}stats_player_{seasonType}_{season}.csv";
         var ttl = IsCurrentOrFutureSeason(season) ? _options.CurrentSeasonCacheTtl : _options.HistoricalCacheTtl;
-        return GetOrCreateAsync($"nfl-season:{seasonType}:{season}", ttl, () => DownloadCsvAsync<SeasonPlayerStats>(url, ct));
+        return GetOrCreateAsync($"nfl-season:{seasonType}:{season}", ttl, () => DownloadCsvAsync<SeasonPlayerStats>(url, ct), ct);
     }
 
     public Task<List<PlayerIdMapping>> GetPlayerIdMappingsAsync(CancellationToken ct = default)
     {
-        return GetOrCreateAsync("nfl-playerids", _options.PlayerIdsCacheTtl, () => DownloadCsvAsync<PlayerIdMapping>(_options.PlayerIdsUrl, ct));
+        return GetOrCreateAsync("nfl-playerids", _options.PlayerIdsCacheTtl, () => DownloadCsvAsync<PlayerIdMapping>(_options.PlayerIdsUrl, ct), ct);
     }
 
     public async Task<Dictionary<string, string>> GetSleeperToGsisMapAsync(CancellationToken ct = default)
@@ -59,7 +60,7 @@ public class NflDataClient : INflDataClient
                     map.TryAdd(m.SleeperId, m.GsisId);
             }
             return map;
-        }).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 
     public async Task<Dictionary<string, SeasonPlayerStats>> GetSeasonStatsBySleeperIdAsync(int season, string seasonType = "reg", CancellationToken ct = default)
@@ -71,8 +72,8 @@ public class NflDataClient : INflDataClient
             var mapTask = GetSleeperToGsisMapAsync(ct);
             await Task.WhenAll(statsTask, mapTask).ConfigureAwait(false);
 
-            var stats = statsTask.Result;
-            var sleeperToGsis = mapTask.Result;
+            var stats = await statsTask.ConfigureAwait(false);
+            var sleeperToGsis = await mapTask.ConfigureAwait(false);
 
             // Reverse: GSIS -> Sleeper
             var gsisToSleeper = new Dictionary<string, string>();
@@ -86,7 +87,7 @@ public class NflDataClient : INflDataClient
                     result.TryAdd(sleeperId, stat);
             }
             return result;
-        }).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 
     public async Task<Dictionary<string, List<WeeklyPlayerStats>>> GetWeeklyStatsBySleeperIdAsync(int season, CancellationToken ct = default)
@@ -98,8 +99,8 @@ public class NflDataClient : INflDataClient
             var mapTask = GetSleeperToGsisMapAsync(ct);
             await Task.WhenAll(statsTask, mapTask).ConfigureAwait(false);
 
-            var stats = statsTask.Result;
-            var sleeperToGsis = mapTask.Result;
+            var stats = await statsTask.ConfigureAwait(false);
+            var sleeperToGsis = await mapTask.ConfigureAwait(false);
 
             var gsisToSleeper = new Dictionary<string, string>();
             foreach (var (sleeperId, gsisId) in sleeperToGsis)
@@ -119,7 +120,7 @@ public class NflDataClient : INflDataClient
                 }
             }
             return result;
-        }).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 
     // Helpers
@@ -132,15 +133,8 @@ public class NflDataClient : INflDataClient
         return csv.GetRecords<T>().ToList();
     }
 
-    private async Task<T> GetOrCreateAsync<T>(string key, TimeSpan ttl, Func<Task<T>> factory)
-    {
-        if (_cache.TryGetValue(key, out T? cached) && cached is not null)
-            return cached;
-
-        var result = await factory().ConfigureAwait(false);
-        _cache.Set(key, result, ttl);
-        return result!;
-    }
+    private Task<T> GetOrCreateAsync<T>(string key, TimeSpan ttl, Func<Task<T>> factory, CancellationToken ct)
+        => _cache.GetOrCreateIfNotNullAsync(key, ttl, factory, ct);
 
     private static bool IsCurrentOrFutureSeason(int season) => season >= DateTime.UtcNow.Year - 1;
 }

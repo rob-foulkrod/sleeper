@@ -24,10 +24,10 @@ public class FantasyService : IFantasyService
 
         await Task.WhenAll(scorerTask, weeklyTask).ConfigureAwait(false);
 
-        var scorer = scorerTask.Result;
+        var scorer = await scorerTask.ConfigureAwait(false);
         if (scorer is null) return null;
 
-        var weeklyBySleeper = weeklyTask.Result;
+        var weeklyBySleeper = await weeklyTask.ConfigureAwait(false);
         if (!weeklyBySleeper.TryGetValue(sleeperId, out var weeks)) return null;
 
         var weekStats = weeks.FirstOrDefault(w => w.Week == week);
@@ -43,10 +43,10 @@ public class FantasyService : IFantasyService
 
         await Task.WhenAll(scorerTask, seasonTask).ConfigureAwait(false);
 
-        var scorer = scorerTask.Result;
+        var scorer = await scorerTask.ConfigureAwait(false);
         if (scorer is null) return null;
 
-        var seasonBySleeper = seasonTask.Result;
+        var seasonBySleeper = await seasonTask.ConfigureAwait(false);
         if (!seasonBySleeper.TryGetValue(sleeperId, out var stats)) return null;
 
         return scorer.ScoreSeason(stats);
@@ -60,11 +60,11 @@ public class FantasyService : IFantasyService
 
         await Task.WhenAll(scorerTask, rosterTask, weeklyTask).ConfigureAwait(false);
 
-        var scorer = scorerTask.Result;
-        var roster = rosterTask.Result;
+        var scorer = await scorerTask.ConfigureAwait(false);
+        var roster = await rosterTask.ConfigureAwait(false);
         if (scorer is null || roster is null) return [];
 
-        var weeklyBySleeper = weeklyTask.Result;
+        var weeklyBySleeper = await weeklyTask.ConfigureAwait(false);
         var allPlayers = await _sleeper.GetAllPlayersAsync("nfl", ct).ConfigureAwait(false);
 
         return ScoreRosterWeekly(roster, scorer, weeklyBySleeper, allPlayers, week);
@@ -78,11 +78,11 @@ public class FantasyService : IFantasyService
 
         await Task.WhenAll(scorerTask, rosterTask, seasonTask).ConfigureAwait(false);
 
-        var scorer = scorerTask.Result;
-        var roster = rosterTask.Result;
+        var scorer = await scorerTask.ConfigureAwait(false);
+        var roster = await rosterTask.ConfigureAwait(false);
         if (scorer is null || roster is null) return [];
 
-        var seasonBySleeper = seasonTask.Result;
+        var seasonBySleeper = await seasonTask.ConfigureAwait(false);
         var allPlayers = await _sleeper.GetAllPlayersAsync("nfl", ct).ConfigureAwait(false);
 
         return ScoreRosterSeason(roster, scorer, seasonBySleeper, allPlayers);

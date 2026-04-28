@@ -120,10 +120,12 @@ Normal runs first call `GetAgentAsync`. If an agent is missing and `Foundry:Auto
 
 ## Quick Agent Test
 
+The full reporting CLI reference lives in [reporting-cli.md](reporting-cli.md).
+
 Run one week from the repo root:
 
 ```powershell
-dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- recap 1 1180276953741729792 2025
+dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- recap --week 1 --league-id 1180276953741729792 --season 2025
 ```
 
 A real agent-backed run should print `Recap Agents online` and should not print `AI recap disabled`. If it prints `AI recap disabled`, the app did not find `Foundry:ProjectEndpoint` in config, user secrets, or environment variables.

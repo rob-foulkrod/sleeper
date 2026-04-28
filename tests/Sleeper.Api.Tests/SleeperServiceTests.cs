@@ -159,6 +159,22 @@ public class SleeperServiceTests
     }
 
     [Fact]
+    public async Task GetLeagueIdForSeasonAsync_ReturnsNull_WhenPreviousLeagueChainCycles()
+    {
+        var (service, client) = Create();
+        client.GetLeagueAsync("lg2025", Arg.Any<CancellationToken>())
+            .Returns(new League("lg2025", "L", "complete", "nfl", "2025", null, 8, null, "lg2024", null, null, null, null));
+        client.GetLeagueAsync("lg2024", Arg.Any<CancellationToken>())
+            .Returns(new League("lg2024", "L", "complete", "nfl", "2024", null, 8, null, "lg2025", null, null, null, null));
+
+        var result = await service.GetLeagueIdForSeasonAsync("lg2025", "2023");
+
+        result.Should().BeNull();
+        await client.Received(1).GetLeagueAsync("lg2025", Arg.Any<CancellationToken>());
+        await client.Received(1).GetLeagueAsync("lg2024", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public void IsTeamDefense_RecognizesAllNflTeams()
     {
         SleeperService.IsTeamDefense("SEA").Should().BeTrue();

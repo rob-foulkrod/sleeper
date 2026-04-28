@@ -9,9 +9,9 @@ using Sleeper.Api.NflData.Models;
 using Sleeper.Api.NflData.Scoring;
 using Sleeper.Api.Services;
 using Sleeper.RosterReport;
+using Sleeper.RosterReport.Cli;
 using Sleeper.RosterReport.Recap;
 
-const string DefaultLeagueId = "1312539280601522176";
 const int HistoryYears = 3;
 
 var configuration = new ConfigurationBuilder()
@@ -23,13 +23,22 @@ var configuration = new ConfigurationBuilder()
     .Build();
 var foundrySettings = FoundryAgentSettings.FromConfiguration(configuration);
 
-if (args.Length == 0)
+var cliResult = ReportCli.Parse(args);
+if (cliResult is ReportCliHelpResult helpResult)
 {
-    PrintUsage();
-    return 1;
+    Console.WriteLine(helpResult.HelpText);
+    return helpResult.ExitCode;
 }
 
-var command = args[0].ToLowerInvariant();
+if (cliResult is ReportCliErrorResult errorResult)
+{
+    Console.Error.WriteLine(errorResult.Message);
+    Console.WriteLine();
+    Console.WriteLine(errorResult.HelpText);
+    return errorResult.ExitCode;
+}
+
+var invocation = ((ReportCliInvocationResult)cliResult).Invocation;
 
 // Wire up DI
 var services = new ServiceCollection();
@@ -42,46 +51,26 @@ var sleeperService = sp.GetRequiredService<ISleeperService>();
 var nflData = sp.GetRequiredService<INflDataClient>();
 var fantasyService = sp.GetRequiredService<IFantasyService>();
 
-return await (command switch
+return await (invocation.Command switch
 {
-    "keepers" => RunKeeperAnalyzer(args),
-    "board" => RunLeagueBoard(args),
-    "player" => RunPlayerDeepDive(args),
-    "team" => RunTeamDeepDive(args),
-    "matchup" => RunMatchupScoreboard(args),
-    "recap" => RunWeeklyRecap(args),
-    "season" => RunSeasonRecap(args),
-    "rosters-history" => RunRostersHistory(args),
-    _ => Task.FromResult(PrintUsage())
+    ReportCommand.Keepers => RunKeeperAnalyzer((KeeperCommandOptions)invocation.Options),
+    ReportCommand.Board => RunLeagueBoard((BoardCommandOptions)invocation.Options),
+    ReportCommand.Player => RunPlayerDeepDive((PlayerCommandOptions)invocation.Options),
+    ReportCommand.Team => RunTeamDeepDive((TeamCommandOptions)invocation.Options),
+    ReportCommand.Matchup => RunMatchupScoreboard((MatchupCommandOptions)invocation.Options),
+    ReportCommand.Recap => RunWeeklyRecap((WeeklyRecapCommandOptions)invocation.Options),
+    ReportCommand.Season => RunSeasonRecap((SeasonRecapCommandOptions)invocation.Options),
+    ReportCommand.RostersHistory => RunRostersHistory((RostersHistoryCommandOptions)invocation.Options),
+    _ => throw new InvalidOperationException($"Unsupported report command {invocation.Command}.")
 });
-
-int PrintUsage()
-{
-    Console.WriteLine("Sleeper Fantasy Football Reports");
-    Console.WriteLine("================================");
-    Console.WriteLine();
-    Console.WriteLine("Usage:");
-    Console.WriteLine("  keepers <username> [league_id]     Keeper analysis with recommendations");
-    Console.WriteLine("  board [league_id]                  All teams' keeper candidates");
-    Console.WriteLine("  player <name> [league_id]          Player deep dive with 3-year trend");
-    Console.WriteLine("  team <username> [league_id]        Full roster deep dive with AI draft outlook");
-    Console.WriteLine("  matchup <week> [league_id]         Weekly matchup scoreboard");
-    Console.WriteLine("  recap <week> [league_id] [season]  AI-authored weekly league recap (writes recaps/{season}/week-NN.md)");
-    Console.WriteLine("  season [league_id] [season]        AI-authored season-in-review (writes recaps/{season}/season.md + machine-readable sidecars)");
-    Console.WriteLine("  rosters-history <season> [league_id] Per-week kickoff-locked rosters (writes datafiles/{season}/week-NN.json)");
-    Console.WriteLine();
-    Console.WriteLine($"  Default league: {DefaultLeagueId}");
-    return 1;
-}
 
 // ======================================================================
 // REPORT 1: KEEPER ANALYZER
 // ======================================================================
-async Task<int> RunKeeperAnalyzer(string[] a)
+async Task<int> RunKeeperAnalyzer(KeeperCommandOptions options)
 {
-    var username = a.Length > 1 ? a[1] : null;
-    var leagueId = a.Length > 2 ? a[2] : DefaultLeagueId;
-    if (username is null) { Console.WriteLine("Usage: keepers <username> [league_id]"); return 1; }
+    var username = options.Username;
+    var leagueId = options.LeagueId;
 
     Console.WriteLine($"Analyzing keepers for '{username}'...");
 
@@ -361,9 +350,9 @@ async Task<int> RunKeeperAnalyzer(string[] a)
 // ======================================================================
 // REPORT 2: LEAGUE KEEPER BOARD
 // ======================================================================
-async Task<int> RunLeagueBoard(string[] a)
+async Task<int> RunLeagueBoard(BoardCommandOptions options)
 {
-    var leagueId = a.Length > 1 ? a[1] : DefaultLeagueId;
+    var leagueId = options.LeagueId;
 
     Console.WriteLine("Generating league-wide keeper board...");
 
@@ -477,11 +466,10 @@ async Task<int> RunLeagueBoard(string[] a)
 // ======================================================================
 // REPORT 3: PLAYER DEEP DIVE
 // ======================================================================
-async Task<int> RunPlayerDeepDive(string[] a)
+async Task<int> RunPlayerDeepDive(PlayerCommandOptions options)
 {
-    var playerName = a.Length > 1 ? a[1] : null;
-    var leagueId = a.Length > 2 ? a[2] : DefaultLeagueId;
-    if (playerName is null) { Console.WriteLine("Usage: player <name> [league_id]"); return 1; }
+    var playerName = options.Name;
+    var leagueId = options.LeagueId;
 
     Console.WriteLine($"Looking up '{playerName}'...");
 
@@ -602,11 +590,10 @@ async Task<int> RunPlayerDeepDive(string[] a)
 // ======================================================================
 // REPORT 5: TEAM DEEP DIVE (full roster with AI draft outlook)
 // ======================================================================
-async Task<int> RunTeamDeepDive(string[] a)
+async Task<int> RunTeamDeepDive(TeamCommandOptions options)
 {
-    var username = a.Length > 1 ? a[1] : null;
-    var leagueId = a.Length > 2 ? a[2] : DefaultLeagueId;
-    if (username is null) { Console.WriteLine("Usage: team <username> [league_id]"); return 1; }
+    var username = options.Username;
+    var leagueId = options.LeagueId;
 
     Console.WriteLine($"Loading roster for '{username}'...");
 
@@ -821,24 +808,23 @@ async Task<int> RunTeamDeepDive(string[] a)
 // ======================================================================
 // REPORT 4: MATCHUP SCOREBOARD
 // ======================================================================
-async Task<int> RunMatchupScoreboard(string[] a)
+async Task<int> RunMatchupScoreboard(MatchupCommandOptions options)
 {
-    var weekStr = a.Length > 1 ? a[1] : null;
-    var leagueId = a.Length > 2 ? a[2] : DefaultLeagueId;
+    var leagueId = options.LeagueId;
 
     var league = await client.GetLeagueAsync(leagueId);
     if (league is null) { Console.WriteLine("League not found."); return 1; }
 
     int week;
-    if (weekStr is null)
+    if (options.Week is null)
     {
         var nflState = await client.GetNflStateAsync();
         week = nflState?.Week ?? 1;
         Console.WriteLine($"Using current week: {week}");
     }
-    else if (!int.TryParse(weekStr, out week))
+    else
     {
-        Console.WriteLine("Invalid week number."); return 1;
+        week = options.Week.Value;
     }
 
     Console.WriteLine($"Fetching Week {week} matchups...");
@@ -872,18 +858,11 @@ async Task<int> RunMatchupScoreboard(string[] a)
 // ======================================================================
 // REPORT 5: WEEKLY LEAGUE RECAP (AI-authored via Microsoft Agent Framework)
 // ======================================================================
-async Task<int> RunWeeklyRecap(string[] a)
+async Task<int> RunWeeklyRecap(WeeklyRecapCommandOptions options)
 {
-    var weekStr = a.Length > 1 ? a[1] : null;
-    var leagueId = a.Length > 2 ? a[2] : DefaultLeagueId;
-    int? overrideSeason = null;
-    if (a.Length > 3 && int.TryParse(a[3], out var s)) overrideSeason = s;
-
-    if (weekStr is null || !int.TryParse(weekStr, out var week))
-    {
-        Console.WriteLine("Usage: recap <week> [league_id] [season]");
-        return 1;
-    }
+    var week = options.Week;
+    var leagueId = options.LeagueId;
+    var overrideSeason = options.Season;
 
     // The league's actual schedule is 17 weeks: regular season through week 15,
     // playoffs week 16 (semifinals) and week 17 (championship). There is no week 18.
@@ -936,11 +915,10 @@ async Task<int> RunWeeklyRecap(string[] a)
 // ======================================================================
 // REPORT 5b: SEASON-IN-REVIEW (deterministic aggregate + AI prose pass)
 // ======================================================================
-async Task<int> RunSeasonRecap(string[] a)
+async Task<int> RunSeasonRecap(SeasonRecapCommandOptions options)
 {
-    var leagueId = a.Length > 1 ? a[1] : DefaultLeagueId;
-    int? overrideSeason = null;
-    if (a.Length > 2 && int.TryParse(a[2], out var s)) overrideSeason = s;
+    var leagueId = options.LeagueId;
+    var overrideSeason = options.Season;
 
     var lore = LeagueLore.TryLoad(RecapPaths.LorePath) ?? LeagueLore.ParseFrom("");
 
@@ -998,16 +976,11 @@ async Task<int> RunSeasonRecap(string[] a)
     Console.WriteLine();
     return 0;
 }
-async Task<int> RunRostersHistory(string[] a)
+async Task<int> RunRostersHistory(RostersHistoryCommandOptions options)
 {
-    var seasonStr = a.Length > 1 ? a[1] : null;
-    var leagueId = a.Length > 2 ? a[2] : DefaultLeagueId;
-
-    if (seasonStr is null || !int.TryParse(seasonStr, out _))
-    {
-        Console.WriteLine("Usage: rosters-history <season> [league_id]");
-        return 1;
-    }
+    var season = options.Season;
+    var seasonStr = season.ToString();
+    var leagueId = options.LeagueId;
 
     var league = await client.GetLeagueAsync(leagueId);
     if (league is null) { Console.WriteLine($"  League {leagueId} not found."); return 1; }
@@ -1050,7 +1023,7 @@ async Task<int> RunRostersHistory(string[] a)
 
     Console.WriteLine($"  Found data for weeks 1..{lastWeekWithData}; writing kickoff-locked rosters...");
 
-    var outDir = RecapPaths.DataDir(int.Parse(seasonStr));
+    var outDir = RecapPaths.DataDir(season);
     Directory.CreateDirectory(outDir);
 
     var jsonOpts = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
@@ -1107,7 +1080,7 @@ async Task<int> RunRostersHistory(string[] a)
             teams
         };
 
-        var file = RecapPaths.DataFile(int.Parse(seasonStr), w);
+        var file = RecapPaths.DataFile(season, w);
         File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(doc, jsonOpts));
         Console.WriteLine($"    wrote {file} ({teams.Count} teams)");
     }

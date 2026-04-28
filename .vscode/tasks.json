@@ -38,6 +38,33 @@
             "problemMatcher": "$msCompile"
         },
         {
+            "label": "report:help",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "run",
+                "--project",
+                "${workspaceFolder}/src/Sleeper.RosterReport/Sleeper.RosterReport.csproj",
+                "--",
+                "--help"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "report:recap help",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "run",
+                "--project",
+                "${workspaceFolder}/src/Sleeper.RosterReport/Sleeper.RosterReport.csproj",
+                "--",
+                "recap",
+                "--help"
+            ],
+            "problemMatcher": []
+        },
+        {
             "label": "host",
             "type": "process",
             "command": "dotnet",
