@@ -5,10 +5,13 @@
 
 # League history
 
-The league was founded in 2024 with eight teams and has kept the same eight
-slots since. Two seasons are complete.
+The league has been running since 2015. Detailed records — weekly scores,
+standings, awards and written recaps — only exist from 2024 onward, so
+everything below covers that period. Two seasons are complete in the archive.
+Never describe 2024 as the league's first season or as its founding year, and
+never claim a fact about a season before 2024.
 
-## 2024 — the inaugural season
+## 2024 — the first season on record
 
 | Place | Owner | Team | Regular season | Points for |
 | --- | --- | --- | --- | --- |

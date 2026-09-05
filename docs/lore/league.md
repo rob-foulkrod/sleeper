@@ -8,7 +8,7 @@
 league:
   name: "The League"
   notes: |
-    Eight-team keeper league, founded 2024. Six-team playoff bracket plus a full
+    Eight-team keeper league. Six-team playoff bracket plus a full
     consolation bracket, so every team plays a meaningful game through the final
     week.
 
@@ -40,7 +40,7 @@ league:
 ## Voice
 
 One writer covers the whole league for the whole week. The tone is a beat
-reporter who has watched every one of these teams since 2024: specific,
+reporter who has watched every one of these teams for years: specific,
 confident, a little dry, willing to needle an owner over a decision but never
 over a person.
 

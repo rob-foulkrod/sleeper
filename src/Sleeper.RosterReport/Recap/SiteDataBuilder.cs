@@ -83,8 +83,8 @@ internal static class SiteDataBuilder
                 // elimination is exactly the kind of result a rivalry claim rests on.
                 notes = new[]
                 {
-                    "all_time records cover the regular season only.",
-                    "head_to_head covers every game played, including playoff and consolation games.",
+                    "Records cover the seasons in this archive, 2024 onward, and the regular season only.",
+                    "Head-to-head counts every game two owners have played, playoffs and consolation included.",
                     "Records are per owner. A franchise that changed hands does not transfer its record."
                 },
                 all_time = BuildAllTime(seasons),
@@ -103,7 +103,7 @@ internal static class SiteDataBuilder
                 head_to_head = headToHead
             },
             articles = BuildArticleIndex(root, recapsRoot),
-            draft = BuildDraftSummary(recapsRoot, readOptions)
+            draft = BuildDraftSummary(recapsRoot)
         };
 
         var outPath = Path.Combine(root, "site", "src", "data", "league.json");
@@ -242,7 +242,10 @@ internal static class SiteDataBuilder
             {
                 name = a.Name,
                 description = a.Description,
-                owner_name = a.OwnerRealName,
+                // Game-level awards name the team but not the owner, so the owner is resolved
+                // from the season roster. UserId is the stable key and is tried first; team
+                // names are mutable, so matching on them is only a fallback.
+                owner_name = RequireAwardOwner(bundle, a),
                 team_name = a.TeamName,
                 player_name = a.PlayerName,
                 metric = a.Metric,
@@ -251,6 +254,58 @@ internal static class SiteDataBuilder
                 citation = a.Citation
             }).ToList()
         };
+    }
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+    /// <summary>
+    /// Resolves the owner an award belongs to, and refuses to emit a null the site would
+    /// crash on. The site types <c>owner_name</c> as required and slugs it at build time,
+    /// so a silent null here fails the Astro build with no indication of which award is at
+    /// fault. Failing here instead names the season and the award.
+    /// </summary>
+    private static string RequireAwardOwner(SeasonBundle bundle, SeasonAward award)
+    {
+        var resolved = FirstNonBlank(
+            award.OwnerRealName,
+            OwnerForUserId(bundle, award.UserId),
+            OwnerForTeamName(bundle, award.TeamName));
+
+        if (string.IsNullOrWhiteSpace(resolved))
+        {
+            throw new InvalidOperationException(
+                $"{bundle.Aggregate.Season} award '{award.Name}' has no resolvable owner " +
+                $"(user_id: {award.UserId ?? "none"}, team: {award.TeamName ?? "none"}). " +
+                "Regenerate the season sidecars before building site data.");
+        }
+
+        return resolved;
+    }
+
+    private static string? OwnerForUserId(SeasonBundle bundle, string? userId)
+    {
+        if (string.IsNullOrWhiteSpace(userId)) return null;
+
+        return bundle.Aggregate.Teams
+            .FirstOrDefault(t => string.Equals(t.UserId, userId, StringComparison.Ordinal))
+            ?.OwnerRealName;
+    }
+
+    private static string? OwnerForTeamName(SeasonBundle bundle, string? teamName)
+    {
+        if (string.IsNullOrWhiteSpace(teamName)) return null;
+
+        foreach (var team in bundle.Aggregate.Teams)
+        {
+            if (string.Equals(team.FinalTeamName, teamName, StringComparison.OrdinalIgnoreCase))
+                return team.OwnerRealName;
+
+            if (team.Weekly.Any(w => string.Equals(w.CurrentTeamName, teamName, StringComparison.OrdinalIgnoreCase)))
+                return team.OwnerRealName;
+        }
+
+        return null;
     }
 
     private static string OwnerFor(SeasonBundle bundle, int rosterId)
@@ -271,9 +326,9 @@ internal static class SiteDataBuilder
     /// last season" as "active" would keep a departed owner listed as current and hide the
     /// incoming one entirely. The upcoming season's export is the only source that knows.
     /// </summary>
-    private static Dictionary<int, string> LoadCurrentOwners(string recapsRoot)
+    private static Dictionary<int, CurrentTeam> LoadCurrentOwners(string recapsRoot)
     {
-        var result = new Dictionary<int, string>();
+        var result = new Dictionary<int, CurrentTeam>();
 
         var exports = Directory
             .EnumerateFiles(recapsRoot, "export.json", SearchOption.AllDirectories)
@@ -290,16 +345,22 @@ internal static class SiteDataBuilder
             if (!team.TryGetProperty("roster_id", out var rosterId)) continue;
             if (!team.TryGetProperty("owner_name", out var ownerName)) continue;
 
-            var name = ownerName.GetString();
-            if (!string.IsNullOrWhiteSpace(name))
-                result[rosterId.GetInt32()] = name;
+            var name = ownerName.GetString()?.Trim();
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            // Owners rename their teams every year, so the name in the current export is the
+            // only one that is actually current. The newest played season is already history.
+            var teamName = team.TryGetProperty("team_name", out var t) ? t.GetString()?.Trim() : null;
+            result[rosterId.GetInt32()] = new CurrentTeam(name, string.IsNullOrWhiteSpace(teamName) ? null : teamName);
         }
 
         return result;
     }
 
+    private sealed record CurrentTeam(string OwnerName, string? TeamName);
+
     /// <summary>A franchise is the roster slot. It outlives the person holding it.</summary>
-    private static List<object> BuildFranchises(List<SeasonBundle> seasons, Dictionary<int, string> currentOwners)
+    private static List<object> BuildFranchises(List<SeasonBundle> seasons, Dictionary<int, CurrentTeam> currentOwners)
     {
         var rosterIds = seasons
             .SelectMany(s => s.Aggregate.Teams.Select(t => t.RosterId))
@@ -329,17 +390,28 @@ internal static class SiteDataBuilder
                 .ToList();
 
             var owners = timeline.Select(t => t.owner_name).Distinct().ToList();
-            currentOwners.TryGetValue(rosterId, out var currentOwner);
+            currentOwners.TryGetValue(rosterId, out var current);
+
+            // The site types current_owner_name as required and slugs it into a route at
+            // build time, so a null here fails the Astro build with no hint of the cause.
+            // The current export is the only authority on who holds a slot, so if it does
+            // not cover a franchise, say which one and stop.
+            if (current is null)
+            {
+                throw new InvalidOperationException(
+                    $"Franchise {rosterId} has no current owner in the export. " +
+                    "Run 'export' for the current season before building site data.");
+            }
 
             return (object)new
             {
                 franchise_id = rosterId,
-                current_team_name = timeline.LastOrDefault()?.team_name,
-                current_owner_name = currentOwner,
+                current_team_name = FirstNonBlank(current.TeamName, timeline.LastOrDefault()?.team_name),
+                current_owner_name = current.OwnerName,
                 // An owner appears here once, in the order he held the slot, so a handoff
                 // reads as a handoff rather than as two unrelated teams.
                 owner_history = owners
-                    .Concat(currentOwner is null ? [] : new[] { currentOwner })
+                    .Concat(new[] { current.OwnerName })
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList(),
                 timeline,
@@ -353,9 +425,9 @@ internal static class SiteDataBuilder
     /// he earned and is marked inactive rather than being folded into whoever took the slot.
     /// An incoming owner appears with an empty record rather than inheriting one.
     /// </summary>
-    private static List<OwnerEntry> BuildOwners(List<SeasonBundle> seasons, Dictionary<int, string> currentOwners)
+    private static List<OwnerEntry> BuildOwners(List<SeasonBundle> seasons, Dictionary<int, CurrentTeam> currentOwners)
     {
-        var activeNames = new HashSet<string>(currentOwners.Values, StringComparer.OrdinalIgnoreCase);
+        var activeNames = new HashSet<string>(currentOwners.Values.Select(v => v.OwnerName), StringComparer.OrdinalIgnoreCase);
 
         var ownerSeasons = seasons
             .SelectMany(s => s.Aggregate.Teams.Select(t => new { s.Year, Team = t }))
@@ -395,12 +467,12 @@ internal static class SiteDataBuilder
         }).ToList();
 
         var known = new HashSet<string>(ownerSeasons.Select(g => g.Key), StringComparer.OrdinalIgnoreCase);
-        foreach (var (rosterId, name) in currentOwners.OrderBy(kv => kv.Key))
+        foreach (var (rosterId, current) in currentOwners.OrderBy(kv => kv.Key))
         {
-            if (known.Contains(name)) continue;
+            if (known.Contains(current.OwnerName)) continue;
 
             result.Add(new OwnerEntry(
-                name,
+                current.OwnerName,
                 Active: true,
                 FirstSeason: null,
                 LastSeason: null,
@@ -573,7 +645,7 @@ internal static class SiteDataBuilder
     /// The upcoming season has no results yet, so it contributes its draft rather than a
     /// standings table. Keeper counts and the rounds they cost are the part the site needs.
     /// </summary>
-    private static object? BuildDraftSummary(string recapsRoot, JsonSerializerOptions options)
+    private static object? BuildDraftSummary(string recapsRoot)
     {
         var exports = Directory
             .EnumerateFiles(recapsRoot, "export.json", SearchOption.AllDirectories)
@@ -588,17 +660,33 @@ internal static class SiteDataBuilder
 
         if (!rootElement.TryGetProperty("keeper_summary", out var keeperSummary)) return null;
 
+        // export.json is written in snake_case, unlike the PascalCase season sidecars, so it
+        // needs its own naming policy. Reading it case-insensitively silently produced a
+        // summary of zeroes instead of failing, so the result is checked rather than trusted.
+        var exportOptions = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNameCaseInsensitive = true
+        };
+
+        var entries = JsonSerializer.Deserialize<List<KeeperSummaryEntry>>(keeperSummary.GetRawText(), exportOptions)
+            ?? new List<KeeperSummaryEntry>();
+
+        if (entries.Count > 0 && entries.All(e => e.RosterId == 0))
+            throw new InvalidOperationException(
+                $"Keeper summary in {latest} did not deserialize; every roster_id is 0. The export schema likely changed.");
+
         return new
         {
             season = rootElement.TryGetProperty("season", out var s) ? s.GetString() : null,
-            keeper_summary = JsonSerializer.Deserialize<List<KeeperSummaryEntry>>(keeperSummary.GetRawText(), options),
+            keeper_summary = entries,
             verification = rootElement.TryGetProperty("keeper_verification", out var v)
-                ? JsonSerializer.Deserialize<List<string>>(v.GetRawText(), options)
+                ? JsonSerializer.Deserialize<List<string>>(v.GetRawText(), exportOptions)
                 : null
         };
     }
 
-    private sealed record KeeperSummaryEntry(int RosterId, string OwnerName, int KeeperCount, List<int> RoundsSpent);
+    private sealed record KeeperSummaryEntry(int RosterId, string? OwnerName, int KeeperCount, List<int>? RoundsSpent);
 
     private sealed record SeasonBundle(int Year, SeasonAggregate Aggregate, SeasonAwards? Awards, List<Game> Games);
 

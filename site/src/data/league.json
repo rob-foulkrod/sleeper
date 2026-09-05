@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-09-05T17:45:40.9758325Z",
+  "generated_at_utc": "2026-09-05T18:19:50.5854798Z",
   "league_name": "The League",
   "seasons": [
     {
@@ -1498,6 +1498,7 @@
         {
           "name": "Biggest Blowout",
           "description": "Largest single-game margin of victory.",
+          "owner_name": "Devin",
           "team_name": "GibbMeDaRock",
           "metric": "margin of victory",
           "value": 100.20,
@@ -1507,6 +1508,7 @@
         {
           "name": "Razor\u0027s Edge",
           "description": "Narrowest single-game margin of victory.",
+          "owner_name": "Devin",
           "team_name": "GibbMeDaRock",
           "metric": "margin of victory",
           "value": 0.08,
@@ -1516,6 +1518,7 @@
         {
           "name": "Upset of the Year",
           "description": "Biggest victory by a team whose power-rank entering the week was worse than its opponent\u0027s.",
+          "owner_name": "Dave",
           "team_name": "Hauwk Tua",
           "metric": "margin of victory (lower-power-ranked team)",
           "value": 72.84,
@@ -3063,6 +3066,7 @@
         {
           "name": "Biggest Blowout",
           "description": "Largest single-game margin of victory.",
+          "owner_name": "Brian",
           "team_name": "First in and First Out?",
           "metric": "margin of victory",
           "value": 97.18,
@@ -3072,6 +3076,7 @@
         {
           "name": "Razor\u0027s Edge",
           "description": "Narrowest single-game margin of victory.",
+          "owner_name": "Dakota",
           "team_name": "BearDown",
           "metric": "margin of victory",
           "value": 1.42,
@@ -3081,6 +3086,7 @@
         {
           "name": "Upset of the Year",
           "description": "Biggest victory by a team whose power-rank entering the week was worse than its opponent\u0027s.",
+          "owner_name": "Michael",
           "team_name": "Disappointment",
           "metric": "margin of victory (lower-power-ranked team)",
           "value": 85.5,
@@ -3162,7 +3168,7 @@
     },
     {
       "franchise_id": 2,
-      "current_team_name": "Amon Another level ",
+      "current_team_name": "Amon Another level",
       "current_owner_name": "Devin",
       "owner_history": [
         "Devin"
@@ -3195,7 +3201,7 @@
     },
     {
       "franchise_id": 3,
-      "current_team_name": "Disappointment",
+      "current_team_name": "Cripple",
       "current_owner_name": "Michael",
       "owner_history": [
         "Michael"
@@ -3228,7 +3234,7 @@
     },
     {
       "franchise_id": 4,
-      "current_team_name": "Seasonal Depression",
+      "current_team_name": "Performance Anxiety",
       "current_owner_name": "Jake",
       "owner_history": [
         "Jake"
@@ -3261,7 +3267,7 @@
     },
     {
       "franchise_id": 5,
-      "current_team_name": "He hate me",
+      "current_team_name": "Early and out of hope",
       "current_owner_name": "Dave",
       "owner_history": [
         "Dave"
@@ -3327,7 +3333,7 @@
     },
     {
       "franchise_id": 7,
-      "current_team_name": "First in and First Out?",
+      "current_team_name": "Tri-Lams",
       "current_owner_name": "Brian",
       "owner_history": [
         "Brian"
@@ -3360,7 +3366,7 @@
     },
     {
       "franchise_id": 8,
-      "current_team_name": "BearDown",
+      "current_team_name": "Von",
       "current_owner_name": "Travon",
       "owner_history": [
         "Dakota",
@@ -3734,8 +3740,8 @@
   ],
   "records": {
     "notes": [
-      "all_time records cover the regular season only.",
-      "head_to_head covers every game played, including playoff and consolation games.",
+      "Records cover the seasons in this archive, 2024 onward, and the regular season only.",
+      "Head-to-head counts every game two owners have played, playoffs and consolation included.",
       "Records are per owner. A franchise that changed hands does not transfer its record."
     ],
     "all_time": [
@@ -4733,36 +4739,84 @@
     "season": "2026",
     "keeper_summary": [
       {
-        "roster_id": 0,
-        "keeper_count": 0
+        "roster_id": 1,
+        "owner_name": "Rob",
+        "keeper_count": 3,
+        "rounds_spent": [
+          9,
+          12,
+          24
+        ]
       },
       {
-        "roster_id": 0,
-        "keeper_count": 0
+        "roster_id": 2,
+        "owner_name": "Devin",
+        "keeper_count": 4,
+        "rounds_spent": [
+          3,
+          13,
+          18,
+          20
+        ]
       },
       {
-        "roster_id": 0,
-        "keeper_count": 0
+        "roster_id": 3,
+        "owner_name": "Michael",
+        "keeper_count": 3,
+        "rounds_spent": [
+          14,
+          15,
+          18
+        ]
       },
       {
-        "roster_id": 0,
-        "keeper_count": 0
+        "roster_id": 4,
+        "owner_name": "Jake",
+        "keeper_count": 4,
+        "rounds_spent": [
+          11,
+          13,
+          14,
+          26
+        ]
       },
       {
-        "roster_id": 0,
-        "keeper_count": 0
+        "roster_id": 5,
+        "owner_name": "Dave",
+        "keeper_count": 3,
+        "rounds_spent": [
+          9,
+          10,
+          15
+        ]
       },
       {
-        "roster_id": 0,
-        "keeper_count": 0
+        "roster_id": 6,
+        "owner_name": "Eric",
+        "keeper_count": 4,
+        "rounds_spent": [
+          10,
+          12,
+          22,
+          24
+        ]
       },
       {
-        "roster_id": 0,
-        "keeper_count": 0
+        "roster_id": 7,
+        "owner_name": "Brian",
+        "keeper_count": 4,
+        "rounds_spent": [
+          11,
+          12,
+          13,
+          24
+        ]
       },
       {
-        "roster_id": 0,
-        "keeper_count": 0
+        "roster_id": 8,
+        "owner_name": "Travon",
+        "keeper_count": 0,
+        "rounds_spent": []
       }
     ],
     "verification": [
