@@ -486,3 +486,5 @@ $RECYCLE.BIN/
 
 .run/
 
+# Local Copilot recap replay artifacts
+recap-runs/

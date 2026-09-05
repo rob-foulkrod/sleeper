@@ -73,6 +73,8 @@ public class LeagueTools
         [Description("How many players to show per position")] int top = 20,
         [Description("Sleeper league ID")] string league_id = "1312539280601522176")
     {
+        if (top <= 0) return "Error: Top must be greater than zero.";
+
         var rankings = await analysis.GetLeagueRankingsAsync(league_id, season);
 
         var sb = new StringBuilder();
@@ -104,6 +106,8 @@ public class LeagueTools
         [Description("'add' for most added, 'drop' for most dropped")] string type = "add",
         [Description("Number of players to show")] int limit = 15)
     {
+        if (type is not "add" and not "drop") return "Error: Type must be 'add' or 'drop'.";
+
         var trending = await client.GetTrendingPlayersAsync("nfl", type, limit: limit);
         var allPlayers = await client.GetAllPlayersAsync();
 

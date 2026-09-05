@@ -306,7 +306,11 @@ public sealed record NextWeekMatchup(
     decimal? PowerRankingGap,
     string? StoryHookType,
     string? StoryHookLabel,
-    SeedImplication? SeedImplication
+    SeedImplication? SeedImplication,
+    string? Pick = null,
+    string? Confidence = null,
+    string? KeyXFactor = null,
+    List<string>? PlayerNotes = null
 );
 
 public sealed record SeedImplication(

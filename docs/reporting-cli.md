@@ -43,6 +43,25 @@ Use `--league-id <id>` on any report command to override it.
 
 Foundry-backed reports degrade when Foundry is not configured. Setup lives in [foundry-agent-configuration.md](foundry-agent-configuration.md). The deterministic data work still runs where possible.
 
+## Layered League Lore
+
+Recap commands merge lore from general to specific. Missing files are ignored:
+
+```text
+docs/league-lore.md            # legacy base, retained for compatibility
+docs/lore/league.md            # league identity and rules
+docs/lore/owners.md            # stable owner personas and relationships
+docs/lore/history.md           # championships, trades, and running jokes
+docs/lore/seasons/{season}.md  # season membership, names, and narratives
+docs/lore/weeks/{season}-{week}.md
+```
+
+Later YAML frontmatter overrides earlier structured facts. Owner aliases and
+notes accumulate; a relationship with the same `type` replaces the earlier
+relationship while keeping its priority position. Markdown prose from every
+applicable layer is included in the agent prompt with source markers. Weekly
+layers apply only to weekly recaps; season recaps stop at the season layer.
+
 ## Commands
 
 ### `keepers`
@@ -196,6 +215,42 @@ recaps/{season}/charts/*.svg
 ```
 
 The positional form `season 2025` now means season `2025` for the default league.
+
+### `copilot-replay`
+
+Replay historical weekly recaps with GitHub Copilot and compare them blindly
+against the existing recap files. This experimental command never writes into
+`recaps/{season}`.
+
+```powershell
+dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- copilot-replay
+```
+
+Defaults target the 2025 league (`1180276953741729792`) and Weeks 1–3. Options:
+
+| Option | Required | Description |
+| --- | --- | --- |
+| `--season`, `-s` | No | Historical season. Default: `2025`. |
+| `--start-week` | No | First replay week. Default: `1`. |
+| `--end-week` | No | Last replay week. Default: `3`. |
+| `--league-id`, `-l` | No | Historical Sleeper league ID. |
+| `--run-id` | No | Immutable run directory name; defaults to a UTC timestamp. |
+
+Output:
+
+```text
+recap-runs/{season}/{run-id}/
+```
+
+Each run contains the exact input envelopes, Copilot recaps, blind evaluations,
+run manifest, and an `assistant.usage` ledger with tokens, duration, model
+multiplier cost, and nano-AIU reported by the SDK. AI units are telemetry rather
+than a dollar invoice or guaranteed premium-request count.
+
+The command uses the logged-in GitHub Copilot user. Writer and evaluator models,
+reasoning effort, timeout, and game-story concurrency are configured under the
+`Copilot` section in `appsettings.json`. The writer and evaluator models must
+differ.
 
 ### `rosters-history`
 

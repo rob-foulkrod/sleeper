@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using ModelContextProtocol.Server;
+using Sleeper.Api.Exceptions;
 using Sleeper.Api.NflData.Services;
 
 namespace Sleeper.McpServer.Tools;
@@ -14,7 +15,15 @@ public class KeeperTools
         [Description("Sleeper username to analyze")] string username,
         [Description("Sleeper league ID")] string league_id = "1312539280601522176")
     {
-        var report = await analysis.GetKeeperAnalysisAsync(league_id, username);
+        KeeperReport report;
+        try
+        {
+            report = await analysis.GetKeeperAnalysisAsync(league_id, username);
+        }
+        catch (SleeperRateLimitException)
+        {
+            return "Error: Sleeper API rate limit exceeded. Try again shortly.";
+        }
         if (report.Analyses.Count == 0) return $"No roster found for '{username}' in league {league_id}.";
 
         var sb = new StringBuilder();

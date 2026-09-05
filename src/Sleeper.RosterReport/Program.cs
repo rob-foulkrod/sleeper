@@ -10,6 +10,7 @@ using Sleeper.Api.NflData.Scoring;
 using Sleeper.Api.Services;
 using Sleeper.RosterReport;
 using Sleeper.RosterReport.Cli;
+using Sleeper.RosterReport.Copilot;
 using Sleeper.RosterReport.Recap;
 
 const int HistoryYears = 3;
@@ -22,6 +23,7 @@ var configuration = new ConfigurationBuilder()
     .AddEnvironmentVariables()
     .Build();
 var foundrySettings = FoundryAgentSettings.FromConfiguration(configuration);
+var copilotSettings = CopilotAgentSettings.FromConfiguration(configuration);
 
 var cliResult = ReportCli.Parse(args);
 if (cliResult is ReportCliHelpResult helpResult)
@@ -59,10 +61,60 @@ return await (invocation.Command switch
     ReportCommand.Team => RunTeamDeepDive((TeamCommandOptions)invocation.Options),
     ReportCommand.Matchup => RunMatchupScoreboard((MatchupCommandOptions)invocation.Options),
     ReportCommand.Recap => RunWeeklyRecap((WeeklyRecapCommandOptions)invocation.Options),
+    ReportCommand.CopilotReplay => RunCopilotReplay((CopilotReplayCommandOptions)invocation.Options),
+    ReportCommand.CopilotProofread => RunCopilotProofread((CopilotProofreadCommandOptions)invocation.Options),
     ReportCommand.Season => RunSeasonRecap((SeasonRecapCommandOptions)invocation.Options),
     ReportCommand.RostersHistory => RunRostersHistory((RostersHistoryCommandOptions)invocation.Options),
     _ => throw new InvalidOperationException($"Unsupported report command {invocation.Command}.")
 });
+
+async Task<int> ResolveLoreSeasonAsync(string leagueId, int? overrideSeason)
+{
+    if (overrideSeason is not null)
+        return overrideSeason.Value;
+
+    var league = await client.GetLeagueAsync(leagueId);
+    return int.TryParse(league?.Season, out var season)
+        ? season
+        : DateTime.UtcNow.Year;
+}
+
+async Task<int> RunCopilotReplay(CopilotReplayCommandOptions options)
+{
+    var runner = new CopilotRecapReplayRunner(client, sleeperService, nflData, copilotSettings);
+    try
+    {
+        var runDirectory = await runner.RunAsync(
+            options.LeagueId,
+            options.Season,
+            options.StartWeek,
+            options.EndWeek,
+            options.RunId);
+        Console.WriteLine();
+        Console.WriteLine($"Copilot replay completed: {runDirectory}");
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Copilot replay failed: {ex.Message}");
+        return 1;
+    }
+}
+
+async Task<int> RunCopilotProofread(CopilotProofreadCommandOptions options)
+{
+    var runner = new CopilotProofreaderRunner(copilotSettings, options.Model);
+    try
+    {
+        await runner.RunAsync(options.Season, options.RunId);
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Copilot proofreading failed: {ex.Message}");
+        return 1;
+    }
+}
 
 // ======================================================================
 // REPORT 1: KEEPER ANALYZER
@@ -872,15 +924,20 @@ async Task<int> RunWeeklyRecap(WeeklyRecapCommandOptions options)
         return 1;
     }
 
-    var lore = LeagueLore.TryLoad(RecapPaths.LorePath);
+    var loreSeason = await ResolveLoreSeasonAsync(leagueId, overrideSeason);
+    var lore = LeagueLore.TryLoadLayers(
+        RecapPaths.LegacyLorePath,
+        RecapPaths.LoreDirectory,
+        loreSeason,
+        week);
     if (lore is null)
     {
-        Console.WriteLine($"  (warning: no lore file found at {RecapPaths.LorePath} -- proceeding without lore)");
+        Console.WriteLine($"  (warning: no lore files found -- proceeding without lore)");
         lore = LeagueLore.ParseFrom("");
     }
     else
     {
-        Console.WriteLine($"  (loaded lore for {lore.Owners.Count} owners, {lore.Relationships.Count} relationship rules)");
+        Console.WriteLine($"  (loaded {lore.Sources.Count} lore layers for {lore.Owners.Count} owners, {lore.Relationships.Count} relationship rules)");
     }
 
     Console.WriteLine($"Building recap envelope for week {week}...");
@@ -920,7 +977,11 @@ async Task<int> RunSeasonRecap(SeasonRecapCommandOptions options)
     var leagueId = options.LeagueId;
     var overrideSeason = options.Season;
 
-    var lore = LeagueLore.TryLoad(RecapPaths.LorePath) ?? LeagueLore.ParseFrom("");
+    var loreSeason = await ResolveLoreSeasonAsync(leagueId, overrideSeason);
+    var lore = LeagueLore.TryLoadLayers(
+        RecapPaths.LegacyLorePath,
+        RecapPaths.LoreDirectory,
+        loreSeason) ?? LeagueLore.ParseFrom("");
 
     Console.WriteLine($"Building season aggregate for league {leagueId}...");
     var seasonBuilder = new SeasonAggregateBuilder(client, sleeperService, nflData, lore);
@@ -1157,4 +1218,3 @@ static string DumpEnvelopeAsMarkdown(RecapEnvelope env)
     foreach (var h in env.AgentFetchHints) sb.AppendLine($"- {h}");
     return sb.ToString();
 }
-
