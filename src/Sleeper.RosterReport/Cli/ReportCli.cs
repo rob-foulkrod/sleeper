@@ -99,6 +99,7 @@ internal static class ReportCli
             ReportCommand.CopilotProofread => ParseCopilotProofread(definition, parsed),
             ReportCommand.Season => ParseSeason(definition, parsed),
             ReportCommand.RostersHistory => ParseRostersHistory(definition, parsed),
+            ReportCommand.Export => ParseExport(definition, parsed),
             _ => new ReportCliErrorResult($"Unsupported command '{definition.Name}'.", RenderRootHelp())
         };
     }
@@ -261,6 +262,19 @@ internal static class ReportCli
 
         var leagueId = LeagueId(parsed, positionalIndex: 1);
         return Invoke(ReportCommand.RostersHistory, new RostersHistoryCommandOptions(season, leagueId));
+    }
+
+    private static ReportCliResult ParseExport(ReportCommandDefinition definition, ParsedTokens parsed)
+    {
+        if (parsed.Positionals.Count > 2)
+            return TooManyPositionals(definition);
+
+        var seasonText = GetOption(parsed, "season") ?? GetSinglePositional(parsed, 0);
+        if (!TryRequiredPositiveInt(seasonText, "season", out var season, out var error))
+            return Missing(definition, error!);
+
+        var leagueId = LeagueId(parsed, positionalIndex: 1);
+        return Invoke(ReportCommand.Export, new ExportCommandOptions(season, leagueId));
     }
 
     private static ParsedTokens ParseTokens(ReportCommandDefinition definition, IReadOnlyList<string> args)
@@ -586,7 +600,22 @@ internal static class ReportCli
                 ["rosters-history <season> [league_id]"],
                 ["rosters-history --season 2025"],
                 ["Writes datafiles/{season}/week-NN.json."],
-                [])
+                []),
+            new(
+                ReportCommand.Export,
+                110,
+                "export",
+                "Dump a season's draft board, keepers, rosters, and schedule as JSON.",
+                "export --season <year> [--league-id <id>]",
+                [season, league, help],
+                ["export <season> [league_id]"],
+                ["export --season 2026"],
+                ["Writes recaps/{season}/export.json."],
+                [
+                    "A raw data dump for in-session analysis. It grades nothing.",
+                    "Keepers come from Sleeper's is_keeper flag, cross-checked against the prior season's rosters.",
+                    "Player SearchRank is a market proxy, not a sourced ADP."
+                ])
         ];
     }
 }
@@ -631,6 +660,8 @@ internal sealed record CopilotProofreadCommandOptions(
 
 internal sealed record RostersHistoryCommandOptions(int Season, string LeagueId) : IReportCommandOptions;
 
+internal sealed record ExportCommandOptions(int Season, string LeagueId) : IReportCommandOptions;
+
 internal enum ReportCommand
 {
     Keepers,
@@ -642,7 +673,8 @@ internal enum ReportCommand
     CopilotReplay,
     CopilotProofread,
     Season,
-    RostersHistory
+    RostersHistory,
+    Export
 }
 
 internal sealed record ReportCommandDefinition(

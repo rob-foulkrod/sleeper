@@ -69,6 +69,7 @@ try
         ReportCommand.CopilotProofread => RunCopilotProofread((CopilotProofreadCommandOptions)invocation.Options),
         ReportCommand.Season => RunSeasonRecap((SeasonRecapCommandOptions)invocation.Options),
         ReportCommand.RostersHistory => RunRostersHistory((RostersHistoryCommandOptions)invocation.Options),
+        ReportCommand.Export => RunExport((ExportCommandOptions)invocation.Options),
         _ => throw new InvalidOperationException($"Unsupported report command {invocation.Command}.")
     });
 }
@@ -1051,6 +1052,9 @@ async Task<int> RunSeasonRecap(SeasonRecapCommandOptions options)
     Console.WriteLine();
     return 0;
 }
+Task<int> RunExport(ExportCommandOptions options)
+    => SeasonExporter.RunAsync(client, options.Season, options.LeagueId);
+
 async Task<int> RunRostersHistory(RostersHistoryCommandOptions options)
 {
     var season = options.Season;

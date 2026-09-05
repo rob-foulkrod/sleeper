@@ -8,15 +8,28 @@
 league:
   name: "The League"
   notes: |
-    Eight-team keeper league, founded 2024. Full-PPR-adjacent scoring, 17-week
-    regular season with a six-team playoff bracket and a full consolation
-    bracket, so every team plays a meaningful game through the final week.
+    Eight-team keeper league, founded 2024. Six-team playoff bracket plus a full
+    consolation bracket, so every team plays a meaningful game through the final
+    week.
+
+    Scoring is **non-PPR**: receptions are worth zero. Receiving and rushing
+    yards score 0.1, passing yards 0.04, passing TDs 4, rushing and receiving
+    TDs 6. This matters more than any other rule when judging a player. Volume
+    possession receivers are worth far less here than in a PPR league, and
+    touchdowns and yardage carry the load. Never evaluate a player against
+    standard PPR assumptions or PPR-based rankings.
+
+    Starting lineup is deep: 2 QB, 4 RB, 4 WR, 2 TE, 2 RB/WR flex, 2 K, 2 DEF,
+    and 12 bench spots — 30 roster slots per team. With eight teams starting 18
+    players each, replacement level is much lower than a standard league, so a
+    "bad" starter here would often be unrostered elsewhere.
 
     Keeper rules: each team may carry up to four keepers into the next draft,
     and each keeper costs the draft round in which that player was originally
-    taken. The team that finishes last forfeits one keeper slot, carrying three
-    instead of four. An owner entering the league for the first time has no
-    keepers and drafts from a clean slate.
+    taken. The team that finishes last forfeits one keeper slot. Teams may also
+    simply choose to keep fewer than their maximum, so a count below four is not
+    by itself evidence of a forfeit. An owner entering the league for the first
+    time has no keepers and drafts from a clean slate.
 
     Rivalries here are earned, not inherited. Everything the league cares about
     comes from the results: head-to-head history, playoff eliminations, title
