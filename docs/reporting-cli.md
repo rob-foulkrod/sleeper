@@ -272,6 +272,69 @@ Output:
 datafiles/{season}/week-NN.json
 ```
 
+### `site-data`
+
+Merge every season's sidecars into the single file the published site renders from.
+
+```powershell
+dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- site-data
+```
+
+Takes no options. It reads `recaps/{season}/season-aggregate.json`, `season-awards.json`, and
+the recap markdown in `recaps/**`, pulls per-week scores from Sleeper's public read API, and
+writes:
+
+```text
+site/src/data/league.json
+```
+
+This is the privacy boundary. Sleeper usernames are internal keys and are stripped here;
+owners reach the site as first names only. Standings, scores, records, and the article index
+are all rendered from this file — never from parsed prose.
+
+It also fails loudly rather than degrading: an award whose owner cannot be resolved, or a
+franchise with no current owner in the export, throws with the season and the award named.
+
+## The weekly loop
+
+During the season the whole cycle is three commands and a commit.
+
+1. **Write the recap.** `recap --week N` produces `recaps/{season}/week-NN.md` with the
+   Copilot writer and the `gpt-5-mini` proofreader. Numbers come from the data; the model
+   only explains and entertains.
+2. **Read it.** Check the scores and standings against the sidecars before you accept it.
+   Nothing downstream re-checks the prose.
+3. **Commit it to `main`.** That is the whole publish step.
+
+`.github/workflows/publish.yml` takes it from there: it regenerates `league.json`, builds the
+site, runs the privacy guard against both the markdown and the built `site/dist`, and deploys
+to Pages. The guard is a gate, not a report — a recap that reintroduces the surname, a Sleeper
+username, or the old league name fails the build and never reaches the site.
+
+The workflow also runs on a Tuesday-morning schedule during the season, and can be started by
+hand from the Actions tab.
+
+### One-time setup
+
+Pages has to be turned on once by hand before the first deploy: **Settings → Pages → Source:
+GitHub Actions**. The workflow deliberately does not enable it automatically, because doing so
+requires a personal access token rather than the built-in `GITHUB_TOKEN`.
+
+Note that this repository is private. Pages sites published from a private repository require a
+paid GitHub plan; on a free plan the deploy step will fail until the repository is made public
+or the plan is upgraded. The privacy scrub and its guard apply either way — they exist so that
+making the repository public is a decision, not an accident.
+
+To preview the site locally before committing:
+
+```powershell
+dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- site-data
+cd site
+npm ci
+npm run build
+npm run preview
+```
+
 ## Adding New Reports
 
 New report commands should follow this contract:
