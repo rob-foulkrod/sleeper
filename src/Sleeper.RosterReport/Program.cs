@@ -53,20 +53,32 @@ var sleeperService = sp.GetRequiredService<ISleeperService>();
 var nflData = sp.GetRequiredService<INflDataClient>();
 var fantasyService = sp.GetRequiredService<IFantasyService>();
 
-return await (invocation.Command switch
+// A season/league mismatch is a user error with an actionable message, so surface it
+// as a clean CLI failure rather than an unhandled stack trace.
+try
 {
-    ReportCommand.Keepers => RunKeeperAnalyzer((KeeperCommandOptions)invocation.Options),
-    ReportCommand.Board => RunLeagueBoard((BoardCommandOptions)invocation.Options),
-    ReportCommand.Player => RunPlayerDeepDive((PlayerCommandOptions)invocation.Options),
-    ReportCommand.Team => RunTeamDeepDive((TeamCommandOptions)invocation.Options),
-    ReportCommand.Matchup => RunMatchupScoreboard((MatchupCommandOptions)invocation.Options),
-    ReportCommand.Recap => RunWeeklyRecap((WeeklyRecapCommandOptions)invocation.Options),
-    ReportCommand.CopilotReplay => RunCopilotReplay((CopilotReplayCommandOptions)invocation.Options),
-    ReportCommand.CopilotProofread => RunCopilotProofread((CopilotProofreadCommandOptions)invocation.Options),
-    ReportCommand.Season => RunSeasonRecap((SeasonRecapCommandOptions)invocation.Options),
-    ReportCommand.RostersHistory => RunRostersHistory((RostersHistoryCommandOptions)invocation.Options),
-    _ => throw new InvalidOperationException($"Unsupported report command {invocation.Command}.")
-});
+    return await (invocation.Command switch
+    {
+        ReportCommand.Keepers => RunKeeperAnalyzer((KeeperCommandOptions)invocation.Options),
+        ReportCommand.Board => RunLeagueBoard((BoardCommandOptions)invocation.Options),
+        ReportCommand.Player => RunPlayerDeepDive((PlayerCommandOptions)invocation.Options),
+        ReportCommand.Team => RunTeamDeepDive((TeamCommandOptions)invocation.Options),
+        ReportCommand.Matchup => RunMatchupScoreboard((MatchupCommandOptions)invocation.Options),
+        ReportCommand.Recap => RunWeeklyRecap((WeeklyRecapCommandOptions)invocation.Options),
+        ReportCommand.CopilotReplay => RunCopilotReplay((CopilotReplayCommandOptions)invocation.Options),
+        ReportCommand.CopilotProofread => RunCopilotProofread((CopilotProofreadCommandOptions)invocation.Options),
+        ReportCommand.Season => RunSeasonRecap((SeasonRecapCommandOptions)invocation.Options),
+        ReportCommand.RostersHistory => RunRostersHistory((RostersHistoryCommandOptions)invocation.Options),
+        _ => throw new InvalidOperationException($"Unsupported report command {invocation.Command}.")
+    });
+}
+catch (InvalidOperationException ex)
+{
+    Console.Error.WriteLine();
+    Console.Error.WriteLine($"Error: {ex.Message}");
+    Console.Error.WriteLine();
+    return 1;
+}
 
 async Task<int> ResolveLoreSeasonAsync(string leagueId, int? overrideSeason)
 {
@@ -946,12 +958,13 @@ async Task<int> RunWeeklyRecap(WeeklyRecapCommandOptions options)
 
     Console.WriteLine($"  envelope: {envelope.Owners.Count} owners, {envelope.Games.Count} games, {envelope.Themes.WaiverGrades.Count} waivers, {envelope.Themes.Trades.Count} trades, {envelope.AgentFetchHints.Count} fetch hints");
 
-    var agent = await RecapAgent.TryCreateAsync(foundrySettings);
+    await using var agentProvider = await ReportAgentProvider.CreateAsync(copilotSettings);
+    var agent = await agentProvider.TryCreateRecapAgentAsync(foundrySettings);
     string output;
     if (agent is null)
     {
         Console.WriteLine();
-        Console.WriteLine($"  (AI recap disabled -- {foundrySettings.MissingConfigurationMessage})");
+        Console.WriteLine("  (AI recap disabled -- no Copilot session and no Foundry configuration)");
         Console.WriteLine("  (writing data-only envelope dump for debugging)");
         output = DumpEnvelopeAsMarkdown(envelope);
     }
@@ -1016,12 +1029,13 @@ async Task<int> RunSeasonRecap(SeasonRecapCommandOptions options)
     Console.WriteLine($"  Loaded {digests.Count} weekly digests from disk");
 
     // Run the agent.
-    var agent = await SeasonAgent.TryCreateAsync(foundrySettings);
+    await using var agentProvider = await ReportAgentProvider.CreateAsync(copilotSettings);
+    var agent = await agentProvider.TryCreateSeasonAgentAsync(foundrySettings);
     string proseBody = "";
     if (agent is null)
     {
         Console.WriteLine();
-        Console.WriteLine($"  (Season agent disabled -- {foundrySettings.MissingConfigurationMessage})");
+        Console.WriteLine("  (Season agent disabled -- no Copilot session and no Foundry configuration)");
     }
     else
     {

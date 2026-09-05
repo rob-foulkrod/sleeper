@@ -88,8 +88,20 @@ internal sealed class RecapEnvelopeBuilder
         var nflState = nflStateTask.Result;
 
         // 2. Determine season + season-type/playoff round.
-        var season = overrideSeason ??
-                     (int.TryParse(league.Season, out var parsed) ? parsed : DateTime.UtcNow.Year);
+        var leagueSeason = int.TryParse(league.Season, out var parsed) ? parsed : (int?)null;
+
+        // --season labels the output but does NOT change which league is fetched. Letting a
+        // mismatch through silently mislabels another season's data and overwrites that
+        // season's recap on disk, so refuse rather than write a wrong file.
+        if (overrideSeason is not null && leagueSeason is not null && overrideSeason != leagueSeason)
+        {
+            throw new InvalidOperationException(
+                $"League {leagueId} is season {leagueSeason}, but --season {overrideSeason} was requested. " +
+                $"Pass the league ID for {overrideSeason} instead: --league <id>. " +
+                "Using the wrong league would write mislabeled data over that season's recap.");
+        }
+
+        var season = overrideSeason ?? leagueSeason ?? DateTime.UtcNow.Year;
 
         var (seasonType, playoffRound, isFinalWeek) = ClassifyWeek(league, week, winnersBracket, losersBracket);
 
@@ -1241,7 +1253,11 @@ internal sealed class RecapEnvelopeBuilder
         });
         history.Snapshots.Sort((a, b) => a.Week.CompareTo(b.Week));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, JsonSerializer.Serialize(history, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(path, JsonSerializer.Serialize(history, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        }));
     }
 
     // ---------------- Helpers ----------------
@@ -2160,8 +2176,36 @@ internal sealed class RecapEnvelopeBuilder
 
     private sealed class TeamNameEntry
     {
+        private string _ownerName = "";
+
         public string TeamName { get; set; } = "";
-        public string OwnerName { get; set; } = "";
+
+        public string OwnerName
+        {
+            get => _ownerName;
+            set { if (!string.IsNullOrWhiteSpace(value)) _ownerName = value; }
+        }
+
+        // Legacy schema migration: older snapshots stored the owner under "DisplayName".
+        // Read it so historical entries keep their name, but never write it back out.
+        public string? DisplayName
+        {
+            get => null;
+            set
+            {
+                if (string.IsNullOrWhiteSpace(OwnerName) && !string.IsNullOrWhiteSpace(value))
+                {
+                    OwnerName = value;
+                }
+            }
+        }
+
+        // Legacy "Username" is a platform handle and must never round-trip. Read and discard.
+        public string? Username
+        {
+            get => null;
+            set { }
+        }
     }
 }
 

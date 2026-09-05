@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Agents.AI;
+using Sleeper.RosterReport.Agents;
 
 namespace Sleeper.RosterReport.Recap;
 
@@ -14,14 +15,20 @@ namespace Sleeper.RosterReport.Recap;
 /// </summary>
 internal sealed class SeasonAgent
 {
-    private readonly AIAgent _agent;
+    private readonly IReportTextAgent _agent;
     private readonly string _model;
 
-    private SeasonAgent(AIAgent agent, string model)
+    private SeasonAgent(IReportTextAgent agent, string model)
     {
         _agent = agent;
         _model = model;
     }
+
+    /// <summary>
+    /// Wires the season agent to any text backend (Copilot or Foundry).
+    /// </summary>
+    internal static SeasonAgent Create(IReportTextAgent agent, string model)
+        => new(agent, model);
 
     public static async Task<SeasonAgent?> TryCreateAsync(FoundryAgentSettings settings, CancellationToken ct = default)
     {
@@ -36,7 +43,7 @@ internal sealed class SeasonAgent
             return null;
 
         Console.WriteLine($"  (Season Agent online: Foundry agent '{runtime.AgentName}', model '{runtime.ModelDeployment}')");
-        return new SeasonAgent(runtime.Agent, runtime.ModelDeployment);
+        return new SeasonAgent(new FoundryReportTextAgent(runtime.Agent), runtime.ModelDeployment);
     }
 
     /// <summary>
@@ -125,8 +132,11 @@ internal sealed class SeasonAgent
         sb.AppendLine("- Refer to the season as \"the {season} season\" or \"this year\". This document is being read by a future agent next year, so calling it \"this season\" is fine.");
 
         Console.WriteLine($"  Calling SeasonAnalyst (model {_model})...");
-        var response = await _agent.RunAsync(sb.ToString(), cancellationToken: ct).ConfigureAwait(false);
-        return ScrubUsernames(response.Text?.Trim() ?? "", agg.Owners);
+        var response = await _agent.GenerateAsync(
+            sb.ToString(),
+            new AgentCallContext(null, "SeasonAnalyst", agg.Season.ToString()),
+            ct).ConfigureAwait(false);
+        return ScrubUsernames(response.Trim(), agg.Owners);
     }
 
     private static string ScrubUsernames(string text, IReadOnlyList<OwnerRef> owners)

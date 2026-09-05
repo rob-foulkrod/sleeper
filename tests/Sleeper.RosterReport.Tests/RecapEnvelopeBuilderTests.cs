@@ -1,4 +1,6 @@
+using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using FluentAssertions;
 using NSubstitute;
 using Sleeper.Api;
@@ -255,6 +257,37 @@ public class RecapEnvelopeBuilderTests
         config.FlexSlotEligibilities[2].Should().BeEquivalentTo(["WR", "TE"]);
     }
 
+    [Fact]
+    public async Task BuildAsync_Throws_WhenRequestedSeasonDoesNotMatchLeagueSeason()
+    {
+        // --season only labels the output; it does not change which league is fetched.
+        // A mismatch silently mislabels another season's data and overwrites that
+        // season's recap on disk, so it must fail loudly instead.
+        var client = Substitute.For<ISleeperClient>();
+        var sleeperService = Substitute.For<ISleeperService>();
+        var nfl = Substitute.For<INflDataClient>();
+
+        client.GetLeagueAsync(LeagueId, Arg.Any<CancellationToken>()).Returns(CreateLeague(8));
+        client.GetLeagueRostersAsync(LeagueId, Arg.Any<CancellationToken>()).Returns(CreateRosters(8));
+        client.GetLeagueUsersAsync(LeagueId, Arg.Any<CancellationToken>()).Returns(CreateUsers(8));
+        client.GetTransactionsAsync(LeagueId, Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(new List<Transaction>());
+        client.GetWinnersBracketAsync(LeagueId, Arg.Any<CancellationToken>()).Returns([]);
+        client.GetLosersBracketAsync(LeagueId, Arg.Any<CancellationToken>()).Returns([]);
+        client.GetAllPlayersAsync("nfl", Arg.Any<CancellationToken>()).Returns(new Dictionary<string, Player>());
+        client.GetLeagueMatchupsAsync(LeagueId, Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns([]);
+        nfl.GetWeeklyStatsBySleeperIdAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, List<WeeklyPlayerStats>>());
+
+        var builder = new RecapEnvelopeBuilder(client, sleeperService, nfl, LeagueLore.ParseFrom(""));
+
+        // The stub league is season 2025; ask for 2026.
+        var act = async () => await builder.BuildAsync(
+            LeagueId, 1, 2026, options: new RecapEnvelopeBuildOptions(PersistSnapshots: false));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .Where(e => e.Message.Contains("2026") && e.Message.Contains("2025"));
+    }
+
     private static async Task<RecapEnvelope> BuildEnvelopeAsync(
         int week,
         int teamCount,
@@ -362,6 +395,34 @@ public class RecapEnvelopeBuilderTests
         => new(
             id, name, position, null, null, null, points, null, null, false, false,
             null, null, null, null, null, null, null, null, null, null, null);
+
+    [Fact]
+    public void TeamNameEntry_MigratesLegacyDisplayName_AndDropsUsername()
+    {
+        // Older team-name-history.json snapshots stored {DisplayName, TeamName, Username}.
+        // Rewriting one must keep the owner name and must never round-trip the platform handle.
+        var entryType = typeof(RecapEnvelopeBuilder)
+            .GetNestedType("TeamNameEntry", BindingFlags.NonPublic)!;
+
+        const string legacy = """
+            { "DisplayName": "Rob", "TeamName": "Unstoppable Farce", "Username": "robfoulk" }
+            """;
+
+        var entry = JsonSerializer.Deserialize(legacy, entryType)!;
+
+        entryType.GetProperty("OwnerName")!.GetValue(entry).Should().Be("Rob");
+        entryType.GetProperty("TeamName")!.GetValue(entry).Should().Be("Unstoppable Farce");
+
+        var rewritten = JsonSerializer.Serialize(entry, entryType, new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        });
+
+        rewritten.Should().Contain("\"OwnerName\":\"Rob\"");
+        rewritten.Should().NotContain("robfoulk");
+        rewritten.Should().NotContain("DisplayName");
+        rewritten.Should().NotContain("Username");
+    }
 
     private static bool HasRosters(GameRecap game, int rosterA, int rosterB)
         => new[] { game.Home.RosterId, game.Away.RosterId }.Order().SequenceEqual(new[] { rosterA, rosterB });
