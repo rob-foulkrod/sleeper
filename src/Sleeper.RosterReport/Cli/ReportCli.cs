@@ -100,6 +100,7 @@ internal static class ReportCli
             ReportCommand.Season => ParseSeason(definition, parsed),
             ReportCommand.RostersHistory => ParseRostersHistory(definition, parsed),
             ReportCommand.Export => ParseExport(definition, parsed),
+            ReportCommand.SiteData => ParseSiteData(definition, parsed),
             _ => new ReportCliErrorResult($"Unsupported command '{definition.Name}'.", RenderRootHelp())
         };
     }
@@ -275,6 +276,14 @@ internal static class ReportCli
 
         var leagueId = LeagueId(parsed, positionalIndex: 1);
         return Invoke(ReportCommand.Export, new ExportCommandOptions(season, leagueId));
+    }
+
+    private static ReportCliResult ParseSiteData(ReportCommandDefinition definition, ParsedTokens parsed)
+    {
+        if (parsed.Positionals.Count > 0)
+            return TooManyPositionals(definition);
+
+        return Invoke(ReportCommand.SiteData, new SiteDataCommandOptions());
     }
 
     private static ParsedTokens ParseTokens(ReportCommandDefinition definition, IReadOnlyList<string> args)
@@ -615,6 +624,20 @@ internal static class ReportCli
                     "A raw data dump for in-session analysis. It grades nothing.",
                     "Keepers come from Sleeper's is_keeper flag, cross-checked against the prior season's rosters.",
                     "Player SearchRank is a market proxy, not a sourced ADP."
+                ]),
+            new(
+                ReportCommand.SiteData,
+                120,
+                "site-data",
+                "Merge every season's sidecars into the site's league data file.",
+                "site-data",
+                [help],
+                null,
+                ["site-data"],
+                ["Writes site/src/data/league.json."],
+                [
+                    "The site renders standings, scores, and records from this file, never from parsed prose.",
+                    "A franchise is a roster slot and survives an ownership change; an owner keeps only his own seasons."
                 ])
         ];
     }
@@ -662,6 +685,8 @@ internal sealed record RostersHistoryCommandOptions(int Season, string LeagueId)
 
 internal sealed record ExportCommandOptions(int Season, string LeagueId) : IReportCommandOptions;
 
+internal sealed record SiteDataCommandOptions : IReportCommandOptions;
+
 internal enum ReportCommand
 {
     Keepers,
@@ -674,7 +699,8 @@ internal enum ReportCommand
     CopilotProofread,
     Season,
     RostersHistory,
-    Export
+    Export,
+    SiteData
 }
 
 internal sealed record ReportCommandDefinition(

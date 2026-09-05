@@ -70,6 +70,7 @@ try
         ReportCommand.Season => RunSeasonRecap((SeasonRecapCommandOptions)invocation.Options),
         ReportCommand.RostersHistory => RunRostersHistory((RostersHistoryCommandOptions)invocation.Options),
         ReportCommand.Export => RunExport((ExportCommandOptions)invocation.Options),
+        ReportCommand.SiteData => SiteDataBuilder.RunAsync(client),
         _ => throw new InvalidOperationException($"Unsupported report command {invocation.Command}.")
     });
 }
