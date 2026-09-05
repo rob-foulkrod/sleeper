@@ -67,7 +67,7 @@ internal static class ReportCli
         sb.AppendLine("  help <command>    Show detailed help for one report command.");
         sb.AppendLine();
         sb.AppendLine("Examples:");
-        sb.AppendLine($"  dotnet run --project {ProjectPath} -- keepers --username robfoulk");
+        sb.AppendLine($"  dotnet run --project {ProjectPath} -- keepers --username rob");
         sb.AppendLine($"  dotnet run --project {ProjectPath} -- player --name \"Justin Jefferson\"");
         sb.AppendLine($"  dotnet run --project {ProjectPath} -- recap --week 10 --season 2025");
         sb.AppendLine($"  dotnet run --project {ProjectPath} -- help season");
@@ -473,7 +473,7 @@ internal static class ReportCli
                 "keepers --username <username> [--league-id <id>]",
                 [new("--username, -u <username>", "Sleeper username to analyze."), league, help],
                 ["keepers <username> [league_id]"],
-                ["keepers --username robfoulk", "keepers robfoulk"],
+                ["keepers --username rob", "keepers rob"],
                 ["Writes a console report only."],
                 ["Uses Foundry for AI second opinions when configured; otherwise the deterministic report still runs."]),
             new(
@@ -506,7 +506,7 @@ internal static class ReportCli
                 "team --username <username> [--league-id <id>]",
                 [new("--username, -u <username>", "Sleeper username to analyze."), league, help],
                 ["team <username> [league_id]"],
-                ["team --username robfoulk"],
+                ["team --username rob"],
                 ["Writes a console report only."],
                 ["Uses Foundry for AI draft outlooks when configured; otherwise deterministic player sections still run."]),
             new(

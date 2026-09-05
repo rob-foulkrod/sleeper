@@ -62,14 +62,15 @@ internal sealed class SeasonAgent
         var forbidden = new List<string>();
         foreach (var o in agg.Owners.OrderBy(o => o.RosterId))
         {
-            sb.AppendLine($"- **{o.RealName ?? o.DisplayName}** — team \"{o.TeamName}\" (Gen {o.Generation})");
+            sb.AppendLine($"- **{o.RealName ?? o.DisplayName}** — team \"{o.TeamName}\"");
             if (!string.IsNullOrWhiteSpace(o.Username)) forbidden.Add(o.Username);
         }
         sb.AppendLine();
         sb.AppendLine($"FORBIDDEN tokens (must not appear anywhere in your output): {string.Join(", ", forbidden.Select(u => "`" + u + "`"))}.");
         sb.AppendLine();
-        sb.AppendLine("## FAMILY-FRAMING RULE");
-        sb.AppendLine("Every owner is a Foulkrod. Use family framing **only** when it serves a specific moment (the championship if siblings/cousins met, the consolation final if it did, the loser's saga if generation matters). Do NOT lean on family framing in every section.");
+        sb.AppendLine("## NAMES AND RIVALRY RULE");
+        sb.AppendLine("Refer to owners by first name only. NEVER write a surname or a last initial, and never attach a family name to the league itself.");
+        sb.AppendLine("NEVER frame anything around a personal relationship between owners — no father/son, brother, cousin, nephew, sibling, or generational framing. Rivalries in this league come from results only: head-to-head history, playoff eliminations, title rematches, standings stakes, and win streaks.");
         sb.AppendLine();
 
         // Pre-computed analytical hooks. The agent CONSISTENTLY hallucinates power-rank

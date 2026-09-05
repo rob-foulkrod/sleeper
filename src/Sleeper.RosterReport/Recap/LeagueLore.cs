@@ -192,7 +192,6 @@ internal sealed class LeagueLore
         => new()
         {
             Name = overlay.Name ?? current.Name,
-            Surname = overlay.Surname ?? current.Surname,
             Notes = Combine(current.Notes, overlay.Notes)
         };
 
@@ -296,7 +295,6 @@ internal sealed class LeagueLore
 internal sealed class LoreLeague
 {
     public string? Name { get; set; }
-    public string? Surname { get; set; }
     public string? Notes { get; set; }
 }
 

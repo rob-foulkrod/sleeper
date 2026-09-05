@@ -1052,17 +1052,25 @@ async Task<int> RunRostersHistory(RostersHistoryCommandOptions options)
     var rosters = await client.GetLeagueRostersAsync(leagueId);
     var players = await client.GetAllPlayersAsync();
 
+    // Resolve owner identity through lore so no Sleeper handle reaches these data files.
+    var historyLore = LeagueLore.TryLoadLayers(
+        RecapPaths.LegacyLorePath,
+        RecapPaths.LoreDirectory,
+        int.TryParse(seasonStr, out var loreSeasonYear) ? loreSeasonYear : DateTime.UtcNow.Year)
+        ?? LeagueLore.ParseFrom("");
+
     var ownerByRosterId = rosters.ToDictionary(
         r => r.RosterId,
         r =>
         {
             var u = users.FirstOrDefault(x => x.UserId == r.OwnerId);
+            var handle = u?.Username ?? u?.DisplayName ?? "";
+            historyLore.OwnersByUsername.TryGetValue(handle.ToLowerInvariant(), out var loreOwner);
             return new
             {
                 UserId = r.OwnerId,
-                Username = u?.Username ?? "",
-                DisplayName = u?.DisplayName ?? u?.Username ?? $"Roster {r.RosterId}",
-                TeamName = u?.Metadata != null && u.Metadata.TryGetValue("team_name", out var tn) && !string.IsNullOrWhiteSpace(tn) ? tn : (u?.DisplayName ?? "")
+                OwnerName = loreOwner?.Name ?? $"Roster {r.RosterId}",
+                TeamName = u?.Metadata != null && u.Metadata.TryGetValue("team_name", out var tn) && !string.IsNullOrWhiteSpace(tn) ? tn : ""
             };
         });
 
@@ -1119,8 +1127,7 @@ async Task<int> RunRostersHistory(RostersHistoryCommandOptions options)
             {
                 roster_id = m.RosterId,
                 user_id = o?.UserId,
-                username = o?.Username,
-                display_name = o?.DisplayName,
+                owner_name = o?.OwnerName,
                 team_name = o?.TeamName,
                 matchup_id = m.MatchupId,
                 points = m.Points,
@@ -1135,7 +1142,7 @@ async Task<int> RunRostersHistory(RostersHistoryCommandOptions options)
             season = seasonStr,
             week = w,
             league_id = leagueId,
-            league_name = league.Name,
+            league_name = FirstNonBlankName(historyLore.League.Name, "The League"),
             captured_at_utc = DateTime.UtcNow.ToString("o"),
             note = "Kickoff-locked roster snapshot derived from /league/{id}/matchups/{week}. Includes starters and bench at lock time, with per-player points scored that week.",
             teams
@@ -1150,9 +1157,30 @@ async Task<int> RunRostersHistory(RostersHistoryCommandOptions options)
     return 0;
 }
 
+static string FirstNonBlankName(params string?[] candidates)
+    => candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c)) ?? "The League";
+
 static string DumpEnvelopeAsMarkdown(RecapEnvelope env)
 {
     var sb = new System.Text.StringBuilder();
+
+    // Never leak Sleeper usernames into published markdown: map every owner handle
+    // (username or platform display name) to the lore first name. This fails CLOSED —
+    // an owner with no lore entry renders as "Roster N" rather than falling back to a
+    // platform handle, because most handles embed a surname.
+    var nameByHandle = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var o in env.Owners)
+    {
+        var safe = !string.IsNullOrWhiteSpace(o.RealName) ? o.RealName! : $"Roster {o.RosterId}";
+        if (!string.IsNullOrWhiteSpace(o.Username)) nameByHandle[o.Username] = safe;
+        if (!string.IsNullOrWhiteSpace(o.DisplayName)) nameByHandle[o.DisplayName] = safe;
+    }
+    string Own(string? handle)
+    {
+        if (string.IsNullOrWhiteSpace(handle)) return "";
+        return nameByHandle.TryGetValue(handle.Trim(), out var n) ? n : "(owner)";
+    }
+
     sb.AppendLine($"# Week {env.Meta.Week} -- {env.Meta.LeagueName} ({env.Meta.Season})");
     sb.AppendLine();
     sb.AppendLine($"_Data-only dump (no AI agent configured). {env.Meta.SeasonType}{(env.Meta.PlayoffRound is null ? "" : $" / {env.Meta.PlayoffRound}")}._");
@@ -1162,34 +1190,34 @@ static string DumpEnvelopeAsMarkdown(RecapEnvelope env)
     sb.AppendLine("| Rank | Team | Owner | W-L-T | PF | PA | FAAB |");
     sb.AppendLine("|---:|---|---|:---:|---:|---:|---:|");
     foreach (var s in env.Standings)
-        sb.AppendLine($"| {s.Rank} | {s.TeamName} | {s.OwnerDisplay} | {s.Wins}-{s.Losses}-{s.Ties} | {s.PointsFor:F2} | {s.PointsAgainst:F2} | {s.WaiverBudgetRemaining?.ToString() ?? "—"} |");
+        sb.AppendLine($"| {s.Rank} | {s.TeamName} | {Own(s.OwnerDisplay)} | {s.Wins}-{s.Losses}-{s.Ties} | {s.PointsFor:F2} | {s.PointsAgainst:F2} | {s.WaiverBudgetRemaining?.ToString() ?? "—"} |");
     sb.AppendLine();
     sb.AppendLine("## Games");
     sb.AppendLine();
     foreach (var g in env.Games.OrderByDescending(g => g.Home.FinalScore + g.Away.FinalScore))
     {
-        sb.AppendLine($"### {g.Home.OwnerDisplay} ({g.Home.FinalScore:F2}) vs {g.Away.OwnerDisplay} ({g.Away.FinalScore:F2})" +
+        sb.AppendLine($"### {Own(g.Home.OwnerDisplay)} ({g.Home.FinalScore:F2}) vs {Own(g.Away.OwnerDisplay)} ({g.Away.FinalScore:F2})" +
                        (g.StoryHookLabel is null ? "" : $" -- _{g.StoryHookLabel}_"));
         sb.AppendLine($"- Margin: {g.Margin:F2}{(g.Blowout ? " (blowout)" : "")}");
-        if (g.Home.KeyPerformer is not null) sb.AppendLine($"- Hero ({g.Home.OwnerDisplay}): {g.Home.KeyPerformer.FullName} -- {g.Home.KeyPerformer.Points:F1}");
-        if (g.Away.KeyPerformer is not null) sb.AppendLine($"- Hero ({g.Away.OwnerDisplay}): {g.Away.KeyPerformer.FullName} -- {g.Away.KeyPerformer.Points:F1}");
-        if (g.LineupOptimalityHomePct.HasValue) sb.AppendLine($"- Optimality: {g.Home.OwnerDisplay} {g.LineupOptimalityHomePct:F1}% / {g.Away.OwnerDisplay} {g.LineupOptimalityAwayPct:F1}%");
+        if (g.Home.KeyPerformer is not null) sb.AppendLine($"- Hero ({Own(g.Home.OwnerDisplay)}): {g.Home.KeyPerformer.FullName} -- {g.Home.KeyPerformer.Points:F1}");
+        if (g.Away.KeyPerformer is not null) sb.AppendLine($"- Hero ({Own(g.Away.OwnerDisplay)}): {g.Away.KeyPerformer.FullName} -- {g.Away.KeyPerformer.Points:F1}");
+        if (g.LineupOptimalityHomePct.HasValue) sb.AppendLine($"- Optimality: {Own(g.Home.OwnerDisplay)} {g.LineupOptimalityHomePct:F1}% / {Own(g.Away.OwnerDisplay)} {g.LineupOptimalityAwayPct:F1}%");
         sb.AppendLine();
     }
     sb.AppendLine("## League themes");
     sb.AppendLine();
-    if (env.Themes.HighestScore is not null) sb.AppendLine($"- High: {env.Themes.HighestScore.OwnerDisplay} -- {env.Themes.HighestScore.Score:F2}");
-    if (env.Themes.LowestScore is not null) sb.AppendLine($"- Low: {env.Themes.LowestScore.OwnerDisplay} -- {env.Themes.LowestScore.Score:F2}");
+    if (env.Themes.HighestScore is not null) sb.AppendLine($"- High: {Own(env.Themes.HighestScore.OwnerDisplay)} -- {env.Themes.HighestScore.Score:F2}");
+    if (env.Themes.LowestScore is not null) sb.AppendLine($"- Low: {Own(env.Themes.LowestScore.OwnerDisplay)} -- {env.Themes.LowestScore.Score:F2}");
     sb.AppendLine();
     sb.AppendLine("**Top performers**");
     foreach (var p in env.Themes.TopFivePerformers)
-        sb.AppendLine($"- {p.FullName} ({p.Position}, {p.RealNflTeam}) -- {p.Points:F2} pts (owned by {p.OwnedByDisplay})");
+        sb.AppendLine($"- {p.FullName} ({p.Position}, {p.RealNflTeam}) -- {p.Points:F2} pts (owned by {Own(p.OwnedByDisplay)})");
     sb.AppendLine();
     if (env.Themes.WaiverGrades.Count > 0)
     {
         sb.AppendLine("**Waiver / FA splash**");
         foreach (var w in env.Themes.WaiverGrades.Take(8))
-            sb.AppendLine($"- {w.ClaimingDisplay} added {w.PlayerName}{(w.FaabBid is null ? "" : $" (${w.FaabBid})")}{(w.WeekPoints is null ? "" : $" -- {w.WeekPoints:F2} pts this week")}");
+            sb.AppendLine($"- {Own(w.ClaimingDisplay)} added {w.PlayerName}{(w.FaabBid is null ? "" : $" (${w.FaabBid})")}{(w.WeekPoints is null ? "" : $" -- {w.WeekPoints:F2} pts this week")}");
         sb.AppendLine();
     }
     if (env.Themes.Trades.Count > 0)
@@ -1199,7 +1227,7 @@ static string DumpEnvelopeAsMarkdown(RecapEnvelope env)
         {
             sb.AppendLine($"- Trade ({t.CompletedAt:yyyy-MM-dd}):");
             foreach (var side in t.Sides)
-                sb.AppendLine($"  - {side.OwnerDisplay} received: {string.Join(", ", side.ReceivedPlayers)}{(side.ReceivedDraftPicks.Count > 0 ? "; picks: " + string.Join(", ", side.ReceivedDraftPicks) : "")}{(side.FaabReceived > 0 ? $"; ${side.FaabReceived} FAAB" : "")}");
+                sb.AppendLine($"  - {Own(side.OwnerDisplay)} received: {string.Join(", ", side.ReceivedPlayers)}{(side.ReceivedDraftPicks.Count > 0 ? "; picks: " + string.Join(", ", side.ReceivedDraftPicks) : "")}{(side.FaabReceived > 0 ? $"; ${side.FaabReceived} FAAB" : "")}");
         }
         sb.AppendLine();
     }
@@ -1212,7 +1240,7 @@ static string DumpEnvelopeAsMarkdown(RecapEnvelope env)
     sb.AppendLine("## Look-ahead");
     sb.AppendLine();
     foreach (var m in env.LookAhead.Matchups)
-        sb.AppendLine($"- Week {env.LookAhead.NextWeek}: {m.HomeOwnerDisplay} ({m.HomeProjection?.ToString("F1") ?? "?"}) vs {m.AwayOwnerDisplay} ({m.AwayProjection?.ToString("F1") ?? "?"}){(m.StoryHookLabel is null ? "" : $" -- _{m.StoryHookLabel}_")}");
+        sb.AppendLine($"- Week {env.LookAhead.NextWeek}: {Own(m.HomeOwnerDisplay)} ({m.HomeProjection?.ToString("F1") ?? "?"}) vs {Own(m.AwayOwnerDisplay)} ({m.AwayProjection?.ToString("F1") ?? "?"}){(m.StoryHookLabel is null ? "" : $" -- _{m.StoryHookLabel}_")}");
     sb.AppendLine();
     sb.AppendLine("## Agent fetch hints");
     foreach (var h in env.AgentFetchHints) sb.AppendLine($"- {h}");

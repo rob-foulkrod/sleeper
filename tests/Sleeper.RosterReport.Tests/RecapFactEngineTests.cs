@@ -11,8 +11,8 @@ public class RecapFactEngineTests
         var meta = new RecapMeta("123", "League", 2025, 1, "regular", null, false, 8, "0.5 PPR", DateTimeOffset.UtcNow);
         var owners = new List<OwnerRef>
         {
-            new("user1", "user1", "Rob", "Team Rob", 1, 1, "Rob", null),
-            new("user2", "user2", "Brian", "Team Brian", 2, 1, "Brian", null)
+            new("user1", "user1", "Rob", "Team Rob", 1, "Rob", null),
+            new("user2", "user2", "Brian", "Team Brian", 2, "Brian", null)
         };
 
         var game = new GameRecap(
@@ -62,8 +62,8 @@ public class RecapFactEngineTests
         var meta = new RecapMeta("123", "League", 2025, 1, "regular", null, false, 8, "0.5 PPR", DateTimeOffset.UtcNow);
         var owners = new List<OwnerRef>
         {
-            new("user1", "user1", "Rob", "Team Rob", 1, 1, "Rob", null),
-            new("user2", "user2", "Brian", "Team Brian", 2, 1, "Brian", null)
+            new("user1", "user1", "Rob", "Team Rob", 1, "Rob", null),
+            new("user2", "user2", "Brian", "Team Brian", 2, "Brian", null)
         };
 
         var nextMatchup = new NextWeekMatchup(
@@ -120,8 +120,8 @@ public class RecapFactEngineTests
         var meta = new RecapMeta("123", "League", 2025, 1, "regular", null, false, 2, "0.5 PPR", DateTimeOffset.UtcNow);
         var owners = new List<OwnerRef>
         {
-            new("user1", "user1", "Rob", "Team Rob", 1, 1, "Rob", null),
-            new("user2", "user2", "Brian", "Team Brian", 2, 1, "Brian", null)
+            new("user1", "user1", "Rob", "Team Rob", 1, "Rob", null),
+            new("user2", "user2", "Brian", "Team Brian", 2, "Brian", null)
         };
         var home = new GameSide(1, "user1", "user1", "Team Rob", null, 100m, null, [], [], null, null, 0m);
         var away = new GameSide(2, "user2", "user2", "Team Brian", null, 100m, null, [], [], null, null, 0m);

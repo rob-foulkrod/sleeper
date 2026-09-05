@@ -196,7 +196,11 @@ internal sealed class RecapEnvelopeBuilder
         // 11. Build the meta + envelope.
         var meta = new RecapMeta(
             LeagueId: leagueId,
-            LeagueName: league.Name ?? "Unnamed League",
+            // Lore is the only trusted source for the published league name. The Sleeper
+            // API name is deliberately NOT a fallback — it carries identifying information,
+            // and falling back to it would silently reintroduce that whenever lore is
+            // missing or fails to parse.
+            LeagueName: FirstNonBlank(_lore.League.Name, "The League"),
             Season: season,
             Week: week,
             SeasonType: seasonType,
@@ -269,7 +273,6 @@ internal sealed class RecapEnvelopeBuilder
                 DisplayName: displayName,
                 TeamName: teamName,
                 RosterId: r.RosterId,
-                Generation: lore?.Generation ?? 0,
                 RealName: lore?.Name,
                 LoreNotes: lore?.Notes));
         }
@@ -1234,7 +1237,7 @@ internal sealed class RecapEnvelopeBuilder
             GeneratedAt = DateTimeOffset.UtcNow,
             OwnerNames = owners.ToDictionary(
                 o => o.UserId,
-                o => new TeamNameEntry { DisplayName = o.DisplayName, TeamName = o.TeamName, Username = o.Username })
+                o => new TeamNameEntry { TeamName = o.TeamName, OwnerName = o.RealName ?? $"Roster {o.RosterId}" })
         });
         history.Snapshots.Sort((a, b) => a.Week.CompareTo(b.Week));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -1957,6 +1960,14 @@ internal sealed class RecapEnvelopeBuilder
         return (seasonType, label, isFinal);
     }
 
+    /// <summary>Returns the first non-blank candidate, or the final fallback.</summary>
+    private static string FirstNonBlank(params string?[] candidates)
+    {
+        foreach (var candidate in candidates)
+            if (!string.IsNullOrWhiteSpace(candidate)) return candidate.Trim();
+        return "";
+    }
+
     private static string SummariseScoring(League league)
     {
         if (league.ScoringSettings is null) return "(custom scoring)";
@@ -2149,9 +2160,8 @@ internal sealed class RecapEnvelopeBuilder
 
     private sealed class TeamNameEntry
     {
-        public string DisplayName { get; set; } = "";
         public string TeamName { get; set; } = "";
-        public string Username { get; set; } = "";
+        public string OwnerName { get; set; } = "";
     }
 }
 

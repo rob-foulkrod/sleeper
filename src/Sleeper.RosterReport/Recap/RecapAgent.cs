@@ -239,7 +239,7 @@ internal sealed class RecapAgent
         sb.AppendLine("LINEUP-OPTIMALITY RULE: do NOT include the optimality-percentage paragraph unless the gap between the two teams' optimality is at least 15 points. If both teams are within 15 points of each other, omit it entirely. If you do include it, one sentence is the limit.");
         sb.AppendLine("CONCRETE-CLOSER RULE: the final paragraph must name ONE specific consequence of this game — a standings change (use the Standings JSON), a streak that just started/ended/extended (use the Season ledger), a head-to-head tiebreaker shift, a keeper/1.01 implication, or a power-rank move. Do NOT close with generic 'both teams must regroup' / 'look to refine' / 'unpredictable nature' filler. If you cannot name a specific consequence, end on the hero's stat line instead.");
         sb.AppendLine($"REMINDER: this game is **{homeName} vs {awayName}** — no other names belong in the headline.");
-        sb.AppendLine($"NAMES RULE: in prose, use ONLY the real names above (e.g. 'Rob' / 'Rob Foulkrod') or the team names ('{g.Home.CurrentTeamName}', '{g.Away.CurrentTeamName}'). NEVER use internal usernames such as `{g.Home.OwnerDisplay}` or `{g.Away.OwnerDisplay}` — those are database handles, not human names. Translate any username you see in the JSON to the matching real name or team name.");
+        sb.AppendLine($"NAMES RULE: in prose, use ONLY the owner first names above (e.g. 'Rob') or the team names ('{g.Home.CurrentTeamName}', '{g.Away.CurrentTeamName}'). NEVER write a surname or a last initial. NEVER use internal usernames such as `{g.Home.OwnerDisplay}` or `{g.Away.OwnerDisplay}` — those are database handles, not human names. Translate any username you see in the JSON to the matching first name or team name.");
 
         var response = await _gameAgent.GenerateAsync(
             sb.ToString(),
@@ -328,7 +328,7 @@ internal sealed class RecapAgent
     {
         var sb = new StringBuilder();
         sb.AppendLine($"You are writing the league-wide sections of the week {env.Meta.Week} recap for **{env.Meta.LeagueName}** ({env.Meta.Season}).");
-        sb.AppendLine($"Use \"{env.Meta.LeagueName}\" as the league name throughout. Do NOT call it 'The Foulkrod League' or any other label.");
+        sb.AppendLine($"Use \"{env.Meta.LeagueName}\" as the league name throughout. Do NOT invent any other label for it, and never attach a family or surname to it.");
         sb.AppendLine($"Season context: {env.Meta.SeasonType}{(env.Meta.PlayoffRound is null ? "" : $", {env.Meta.PlayoffRound}")}. Final week: {env.Meta.IsFinalWeek}.");
         if (env.Schedule is not null)
         {
@@ -339,15 +339,15 @@ internal sealed class RecapAgent
         var forbiddenUsernames = new List<string>();
         foreach (var o in env.Owners.OrderBy(o => o.RosterId))
         {
-            sb.AppendLine($"- **{o.RealName ?? o.DisplayName}** — team \"{o.TeamName}\" (Gen {o.Generation})");
+            sb.AppendLine($"- **{o.RealName ?? o.DisplayName}** — team \"{o.TeamName}\"");
             if (!string.IsNullOrWhiteSpace(o.Username)) forbiddenUsernames.Add(o.Username);
         }
         sb.AppendLine();
         sb.AppendLine("## NAMES RULE (strict)");
-        sb.AppendLine("In prose, refer to each owner ONLY by their real name (e.g. 'Rob' / 'Rob Foulkrod') or by their team name (e.g. 'Unstoppable Farce'). The following internal usernames MUST NOT appear anywhere in your output: " + string.Join(", ", forbiddenUsernames.Select(u => "`" + u + "`")) + ". If you see one of these usernames in any JSON below, translate it to the matching real name or team name before writing.");
+        sb.AppendLine("In prose, refer to each owner ONLY by their first name (e.g. 'Rob') or by their team name (e.g. 'Unstoppable Farce'). NEVER write a surname or a last initial. The following internal usernames MUST NOT appear anywhere in your output: " + string.Join(", ", forbiddenUsernames.Select(u => "`" + u + "`")) + ". If you see one of these usernames in any JSON below, translate it to the matching first name or team name before writing.");
         sb.AppendLine();
         sb.AppendLine("## FAMILY-FRAMING RULE (strict)");
-        sb.AppendLine("Every owner is a Foulkrod — we all know that. Do NOT call any matchup a 'Brother Bowl', 'Cousin Bowl', 'Father vs Son', 'sibling showdown', 'family rivalry', or refer to one owner as another's son/dad/brother/cousin/nephew, EXCEPT for games whose `StoryImportance` is 4 or higher in the JSON below. For all other games (including everything in the Look-Ahead unless it's the final regular-season week or a playoff game), write straight matchup prose with no family language.");
+        sb.AppendLine("NEVER frame a matchup around a personal relationship between owners. Do NOT call any game a 'Brother Bowl', 'Cousin Bowl', 'Father vs Son', 'sibling showdown', or 'family rivalry', and do NOT describe one owner as another's son, dad, brother, cousin, or nephew. Rivalries in this league come from results only: head-to-head history, playoff eliminations, title rematches, standings stakes, and win streaks. Write straight matchup prose grounded in the JSON below.");
         sb.AppendLine();
         var leagueFactCard = RecapFactEngine.ComputeLeagueCard(env);
         sb.AppendLine();

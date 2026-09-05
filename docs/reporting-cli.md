@@ -48,10 +48,9 @@ Foundry-backed reports degrade when Foundry is not configured. Setup lives in [f
 Recap commands merge lore from general to specific. Missing files are ignored:
 
 ```text
-docs/league-lore.md            # legacy base, retained for compatibility
 docs/lore/league.md            # league identity and rules
-docs/lore/owners.md            # stable owner personas and relationships
-docs/lore/history.md           # championships, trades, and running jokes
+docs/lore/owners.md            # stable owner personas (first names only)
+docs/lore/history.md           # championships, records, and running jokes
 docs/lore/seasons/{season}.md  # season membership, names, and narratives
 docs/lore/weeks/{season}-{week}.md
 ```
@@ -69,7 +68,7 @@ layers apply only to weekly recaps; season recaps stop at the season layer.
 Analyze one team's keeper values and recommendations.
 
 ```powershell
-dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- keepers --username robfoulk
+dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- keepers --username rob
 ```
 
 Options:
@@ -86,7 +85,7 @@ AI behavior: uses the keeper second-opinion Foundry agent when configured; other
 Legacy form:
 
 ```powershell
-dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- keepers robfoulk
+dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- keepers rob
 ```
 
 ### `board`
@@ -133,7 +132,7 @@ dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- pla
 Run a full roster deep dive with keeper context and draft outlook.
 
 ```powershell
-dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- team --username robfoulk
+dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- team --username rob
 ```
 
 Options:
