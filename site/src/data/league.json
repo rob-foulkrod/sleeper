@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-09-05T18:19:50.5854798Z",
+  "generated_at_utc": "2026-09-05T18:28:06.1289304Z",
   "league_name": "The League",
   "seasons": [
     {
@@ -4733,6 +4733,18 @@
       "kind": "weekly-recap",
       "path": "recaps/2025/week-17.md",
       "title": "Week 17 Recap \u2014 The League (2025)"
+    },
+    {
+      "season": 2026,
+      "kind": "draft-recap",
+      "path": "recaps/2026/draft.md",
+      "title": "2026 Draft Recap \u2014 The League"
+    },
+    {
+      "season": 2026,
+      "kind": "season-preview",
+      "path": "recaps/2026/preview.md",
+      "title": "2026 Season Preview \u2014 The League"
     }
   ],
   "draft": {
