@@ -118,4 +118,66 @@ public class ReportCliTests
         error.Message.Should().Contain("Unknown option '--weeks'");
         error.HelpText.Should().Contain("recap --week <week>");
     }
+
+    [Fact]
+    public void Parse_UsesSafeDefaults_ForCopilotReplay()
+    {
+        var result = ReportCli.Parse(["copilot-replay"]);
+
+        var invocation = result.Should().BeOfType<ReportCliInvocationResult>().Subject.Invocation;
+        invocation.Command.Should().Be(ReportCommand.CopilotReplay);
+        var options = invocation.Options.Should().BeOfType<CopilotReplayCommandOptions>().Subject;
+        options.Season.Should().Be(2025);
+        options.StartWeek.Should().Be(1);
+        options.EndWeek.Should().Be(3);
+        options.LeagueId.Should().Be("1180276953741729792");
+        options.RunId.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_ParsesCopilotReplayOptions()
+    {
+        var result = ReportCli.Parse([
+            "copilot-replay",
+            "--season", "2024",
+            "--start-week", "2",
+            "--end-week", "4",
+            "--league-id", "historical-league",
+            "--run-id", "pilot-a"
+        ]);
+
+        var invocation = result.Should().BeOfType<ReportCliInvocationResult>().Subject.Invocation;
+        var options = invocation.Options.Should().BeOfType<CopilotReplayCommandOptions>().Subject;
+        options.Should().Be(new CopilotReplayCommandOptions("historical-league", 2024, 2, 4, "pilot-a"));
+    }
+
+    [Fact]
+    public void Parse_ReadsExportOptions()
+    {
+        var result = ReportCli.Parse(["export", "--season", "2026", "--league-id", "abc123"]);
+
+        var invocation = result.Should().BeOfType<ReportCliInvocationResult>().Subject.Invocation;
+        invocation.Command.Should().Be(ReportCommand.Export);
+        invocation.Options.Should().Be(new ExportCommandOptions(2026, "abc123"));
+    }
+
+    [Fact]
+    public void Parse_ReadsExportPositionalForm()
+    {
+        var result = ReportCli.Parse(["export", "2026"]);
+
+        var invocation = result.Should().BeOfType<ReportCliInvocationResult>().Subject.Invocation;
+        var options = invocation.Options.Should().BeOfType<ExportCommandOptions>().Subject;
+        options.Season.Should().Be(2026);
+        options.LeagueId.Should().Be(ReportCli.DefaultLeagueId);
+    }
+
+    [Fact]
+    public void Parse_FailsExport_WithoutSeason()
+    {
+        var result = ReportCli.Parse(["export"]);
+
+        result.Should().BeOfType<ReportCliErrorResult>()
+            .Which.Message.Should().Contain("season");
+    }
 }

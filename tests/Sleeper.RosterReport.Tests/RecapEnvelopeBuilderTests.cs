@@ -1,4 +1,6 @@
+using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using FluentAssertions;
 using NSubstitute;
 using Sleeper.Api;
@@ -105,6 +107,187 @@ public class RecapEnvelopeBuilderTests
         consolation.StoryImportanceReason.Should().Contain("1.01");
     }
 
+    [Fact]
+    public void ProjectLineupDetailed_UsesScheduleByesAndLegalFlexReplacement()
+    {
+        var matchup = new Matchup(
+            1,
+            1,
+            null,
+            null,
+            ["bye-rb", "starter-wr"],
+            ["bye-rb", "starter-wr", "bench-rb", "bench-te"],
+            null,
+            null);
+        var players = new Dictionary<string, Player>
+        {
+            // Current metadata says MIA, but historical stats correctly place him on BUF.
+            ["bye-rb"] = CreatePlayer("bye-rb", "Bye", "Runner", "RB", "MIA"),
+            ["starter-wr"] = CreatePlayer("starter-wr", "Starting", "Receiver", "WR", "MIA"),
+            ["bench-rb"] = CreatePlayer("bench-rb", "Bench", "Runner", "RB", "NYJ"),
+            ["bench-te"] = CreatePlayer("bench-te", "Bench", "Tight End", "TE", "NE")
+        };
+        var history = new Dictionary<string, List<(int Week, decimal Points)>>
+        {
+            ["bye-rb"] = [(1, 20m), (2, 20m)],
+            ["starter-wr"] = [(1, 10m), (2, 10m)],
+            ["bench-rb"] = [(1, 5m), (2, 5m)],
+            ["bench-te"] = [(1, 15m), (2, 15m)]
+        };
+        var schedule = new List<NflGame>
+        {
+            new() { Season = 2025, GameType = "REG", Week = 3, HomeTeam = "MIA", AwayTeam = "NYJ" },
+            new() { Season = 2025, GameType = "REG", Week = 3, HomeTeam = "NE", AwayTeam = "KC" }
+        };
+        var config = new LeagueRosterConfig(
+            Teams: 2,
+            StarterSlots: new Dictionary<string, int> { ["WR"] = 1 },
+            FlexSlots: 1,
+            BenchSlots: 2,
+            TotalRosterSize: 4,
+            MaxKeepers: 0);
+
+        var (projection, notes) = RecapEnvelopeBuilder.ProjectLineupDetailed(
+            matchup,
+            players,
+            history,
+            new Dictionary<string, List<WeeklyPlayerStats>>
+            {
+                ["bye-rb"] = [new() { Week = 2, Team = "BUF" }],
+                ["starter-wr"] = [new() { Week = 2, Team = "MIA" }],
+                ["bench-rb"] = [new() { Week = 2, Team = "NYJ" }],
+                ["bench-te"] = [new() { Week = 2, Team = "NE" }]
+            },
+            schedule,
+            config,
+            forWeek: 3,
+            applyLiveAvailability: false);
+
+        projection.Should().Be(25m);
+        notes.Should().Contain(note => note.Contains("Bye Runner") && note.Contains("BYE"));
+        notes.Should().Contain(note => note.Contains("bench sub Bench Tight End"));
+    }
+
+    [Fact]
+    public void ProjectLineupDetailed_IgnoresLiveInjuryStatusForHistoricalReplay()
+    {
+        var matchup = new Matchup(1, 1, null, null, ["injured"], ["injured"], null, null);
+        var players = new Dictionary<string, Player>
+        {
+            ["injured"] = CreatePlayer("injured", "Historical", "Starter", "QB", "BUF", "Out")
+        };
+        var history = new Dictionary<string, List<(int Week, decimal Points)>>
+        {
+            ["injured"] = [(1, 20m), (2, 20m)]
+        };
+        var schedule = new List<NflGame>
+        {
+            new() { Season = 2025, GameType = "REG", Week = 3, HomeTeam = "BUF", AwayTeam = "MIA" }
+        };
+        var config = new LeagueRosterConfig(
+            Teams: 2,
+            StarterSlots: new Dictionary<string, int> { ["QB"] = 1 },
+            FlexSlots: 0,
+            BenchSlots: 0,
+            TotalRosterSize: 1,
+            MaxKeepers: 0);
+
+        var historical = RecapEnvelopeBuilder.ProjectLineupDetailed(
+            matchup,
+            players,
+            history,
+            new Dictionary<string, List<WeeklyPlayerStats>>
+            {
+                ["injured"] = [new() { Week = 2, Team = "BUF" }]
+            },
+            schedule,
+            config,
+            forWeek: 3,
+            applyLiveAvailability: false);
+        var live = RecapEnvelopeBuilder.ProjectLineupDetailed(
+            matchup,
+            players,
+            history,
+            new Dictionary<string, List<WeeklyPlayerStats>>(),
+            schedule,
+            config,
+            forWeek: 3,
+            applyLiveAvailability: true);
+
+        historical.Projection.Should().Be(20m);
+        live.Projection.Should().Be(0m);
+        live.Notes.Should().Contain(note => note.Contains("INJURED (Out)"));
+    }
+
+    [Fact]
+    public void ComputeOptimalLineupGain_DoesNotReuseOneStarterSlot()
+    {
+        var starters = new[] { CreatePlayerLine("starter", "Starter", "WR", 5m) };
+        var bench = new[]
+        {
+            CreatePlayerLine("bench-1", "Bench One", "WR", 20m),
+            CreatePlayerLine("bench-2", "Bench Two", "WR", 15m)
+        };
+        var config = new LeagueRosterConfig(
+            Teams: 2,
+            StarterSlots: new Dictionary<string, int> { ["WR"] = 1 },
+            FlexSlots: 0,
+            BenchSlots: 2,
+            TotalRosterSize: 3,
+            MaxKeepers: 0);
+
+        var gain = RecapEnvelopeBuilder.ComputeOptimalLineupGain(starters, bench, config);
+
+        gain.Should().Be(15m);
+    }
+
+    [Fact]
+    public void LeagueRosterConfig_PreservesFlexVariantEligibility()
+    {
+        var league = CreateLeague(2) with
+        {
+            RosterPositions = ["QB", "SUPER_FLEX", "WRRB_FLEX", "REC_FLEX", "BN"]
+        };
+
+        var config = LeagueRosterConfig.FromLeague(league);
+
+        config.FlexSlotEligibilities.Should().HaveCount(3);
+        config.FlexSlotEligibilities![0].Should().Contain("QB");
+        config.FlexSlotEligibilities[1].Should().BeEquivalentTo(["WR", "RB"]);
+        config.FlexSlotEligibilities[2].Should().BeEquivalentTo(["WR", "TE"]);
+    }
+
+    [Fact]
+    public async Task BuildAsync_Throws_WhenRequestedSeasonDoesNotMatchLeagueSeason()
+    {
+        // --season only labels the output; it does not change which league is fetched.
+        // A mismatch silently mislabels another season's data and overwrites that
+        // season's recap on disk, so it must fail loudly instead.
+        var client = Substitute.For<ISleeperClient>();
+        var sleeperService = Substitute.For<ISleeperService>();
+        var nfl = Substitute.For<INflDataClient>();
+
+        client.GetLeagueAsync(LeagueId, Arg.Any<CancellationToken>()).Returns(CreateLeague(8));
+        client.GetLeagueRostersAsync(LeagueId, Arg.Any<CancellationToken>()).Returns(CreateRosters(8));
+        client.GetLeagueUsersAsync(LeagueId, Arg.Any<CancellationToken>()).Returns(CreateUsers(8));
+        client.GetTransactionsAsync(LeagueId, Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(new List<Transaction>());
+        client.GetWinnersBracketAsync(LeagueId, Arg.Any<CancellationToken>()).Returns([]);
+        client.GetLosersBracketAsync(LeagueId, Arg.Any<CancellationToken>()).Returns([]);
+        client.GetAllPlayersAsync("nfl", Arg.Any<CancellationToken>()).Returns(new Dictionary<string, Player>());
+        client.GetLeagueMatchupsAsync(LeagueId, Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns([]);
+        nfl.GetWeeklyStatsBySleeperIdAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, List<WeeklyPlayerStats>>());
+
+        var builder = new RecapEnvelopeBuilder(client, sleeperService, nfl, LeagueLore.ParseFrom(""));
+
+        // The stub league is season 2025; ask for 2026.
+        var act = async () => await builder.BuildAsync(
+            LeagueId, 1, 2026, options: new RecapEnvelopeBuildOptions(PersistSnapshots: false));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .Where(e => e.Message.Contains("2026") && e.Message.Contains("2025"));
+    }
+
     private static async Task<RecapEnvelope> BuildEnvelopeAsync(
         int week,
         int teamCount,
@@ -167,6 +350,79 @@ public class RecapEnvelopeBuilderTests
 
     private static Matchup ScoredMatchup(int rosterId, int matchupId, decimal points)
         => new(rosterId, matchupId, points, null, null, null, null, points == 0m ? null : new Dictionary<string, decimal> { [$"p{rosterId}"] = points });
+
+    private static Player CreatePlayer(
+        string id,
+        string firstName,
+        string lastName,
+        string position,
+        string team,
+        string? injuryStatus = null)
+        => new(
+            PlayerId: id,
+            FirstName: firstName,
+            LastName: lastName,
+            Position: position,
+            Team: team,
+            Age: null,
+            Status: "Active",
+            Number: null,
+            College: null,
+            YearsExp: null,
+            FantasyPositions: [position],
+            InjuryStatus: injuryStatus,
+            Weight: null,
+            Height: null,
+            SearchFullName: null,
+            SearchFirstName: null,
+            SearchLastName: null,
+            SearchRank: null,
+            DepthChartPosition: null,
+            DepthChartOrder: null,
+            Sport: "nfl",
+            Hashtag: null,
+            FantasyDataId: null,
+            BirthCountry: null,
+            EspnId: null,
+            YahooId: null,
+            RotowireId: null,
+            RotoworldId: null,
+            SportradarId: null,
+            PracticeParticipation: null,
+            InjuryStartDate: null);
+
+    private static PlayerLine CreatePlayerLine(string id, string name, string position, decimal points)
+        => new(
+            id, name, position, null, null, null, points, null, null, false, false,
+            null, null, null, null, null, null, null, null, null, null, null);
+
+    [Fact]
+    public void TeamNameEntry_MigratesLegacyDisplayName_AndDropsUsername()
+    {
+        // Older team-name-history.json snapshots stored {DisplayName, TeamName, Username}.
+        // Rewriting one must keep the owner name and must never round-trip the platform handle.
+        var entryType = typeof(RecapEnvelopeBuilder)
+            .GetNestedType("TeamNameEntry", BindingFlags.NonPublic)!;
+
+        const string legacy = """
+            { "DisplayName": "Rob", "TeamName": "Unstoppable Farce", "Username": "robfoulk" }
+            """;
+
+        var entry = JsonSerializer.Deserialize(legacy, entryType)!;
+
+        entryType.GetProperty("OwnerName")!.GetValue(entry).Should().Be("Rob");
+        entryType.GetProperty("TeamName")!.GetValue(entry).Should().Be("Unstoppable Farce");
+
+        var rewritten = JsonSerializer.Serialize(entry, entryType, new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        });
+
+        rewritten.Should().Contain("\"OwnerName\":\"Rob\"");
+        rewritten.Should().NotContain("robfoulk");
+        rewritten.Should().NotContain("DisplayName");
+        rewritten.Should().NotContain("Username");
+    }
 
     private static bool HasRosters(GameRecap game, int rosterA, int rosterB)
         => new[] { game.Home.RosterId, game.Away.RosterId }.Order().SequenceEqual(new[] { rosterA, rosterB });

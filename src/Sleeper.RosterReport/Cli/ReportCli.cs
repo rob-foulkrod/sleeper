@@ -67,7 +67,7 @@ internal static class ReportCli
         sb.AppendLine("  help <command>    Show detailed help for one report command.");
         sb.AppendLine();
         sb.AppendLine("Examples:");
-        sb.AppendLine($"  dotnet run --project {ProjectPath} -- keepers --username robfoulk");
+        sb.AppendLine($"  dotnet run --project {ProjectPath} -- keepers --username rob");
         sb.AppendLine($"  dotnet run --project {ProjectPath} -- player --name \"Justin Jefferson\"");
         sb.AppendLine($"  dotnet run --project {ProjectPath} -- recap --week 10 --season 2025");
         sb.AppendLine($"  dotnet run --project {ProjectPath} -- help season");
@@ -95,8 +95,12 @@ internal static class ReportCli
             ReportCommand.Team => ParseTeam(definition, parsed),
             ReportCommand.Matchup => ParseMatchup(definition, parsed),
             ReportCommand.Recap => ParseRecap(definition, parsed),
+            ReportCommand.CopilotReplay => ParseCopilotReplay(definition, parsed),
+            ReportCommand.CopilotProofread => ParseCopilotProofread(definition, parsed),
             ReportCommand.Season => ParseSeason(definition, parsed),
             ReportCommand.RostersHistory => ParseRostersHistory(definition, parsed),
+            ReportCommand.Export => ParseExport(definition, parsed),
+            ReportCommand.SiteData => ParseSiteData(definition, parsed),
             _ => new ReportCliErrorResult($"Unsupported command '{definition.Name}'.", RenderRootHelp())
         };
     }
@@ -207,6 +211,47 @@ internal static class ReportCli
         return Invoke(ReportCommand.Season, new SeasonRecapCommandOptions(leagueId, season));
     }
 
+    private static ReportCliResult ParseCopilotReplay(ReportCommandDefinition definition, ParsedTokens parsed)
+    {
+        if (parsed.Positionals.Count > 0)
+            return TooManyPositionals(definition);
+
+        if (!TryOptionalPositiveInt(GetOption(parsed, "season"), "season", out var season, out var error))
+            return Missing(definition, error!);
+        if (!TryOptionalPositiveInt(GetOption(parsed, "start-week"), "start-week", out var startWeek, out error))
+            return Missing(definition, error!);
+        if (!TryOptionalPositiveInt(GetOption(parsed, "end-week"), "end-week", out var endWeek, out error))
+            return Missing(definition, error!);
+
+        return Invoke(
+            ReportCommand.CopilotReplay,
+            new CopilotReplayCommandOptions(
+                GetOption(parsed, "league-id") ?? "1180276953741729792",
+                season ?? 2025,
+                startWeek ?? 1,
+                endWeek ?? 3,
+                GetOption(parsed, "run-id")));
+    }
+
+    private static ReportCliResult ParseCopilotProofread(ReportCommandDefinition definition, ParsedTokens parsed)
+    {
+        if (parsed.Positionals.Count > 0)
+            return TooManyPositionals(definition);
+
+        if (!TryOptionalPositiveInt(GetOption(parsed, "season"), "season", out var season, out var error))
+            return Missing(definition, error!);
+
+        var runId = GetOption(parsed, "run-id");
+        if (string.IsNullOrWhiteSpace(runId))
+            return Missing(definition, "Missing required option --run-id <id>.");
+
+        var model = GetOption(parsed, "model") ?? "gpt-5-mini";
+
+        return Invoke(
+            ReportCommand.CopilotProofread,
+            new CopilotProofreadCommandOptions(season ?? 2025, runId, model));
+    }
+
     private static ReportCliResult ParseRostersHistory(ReportCommandDefinition definition, ParsedTokens parsed)
     {
         if (parsed.Positionals.Count > 2)
@@ -218,6 +263,27 @@ internal static class ReportCli
 
         var leagueId = LeagueId(parsed, positionalIndex: 1);
         return Invoke(ReportCommand.RostersHistory, new RostersHistoryCommandOptions(season, leagueId));
+    }
+
+    private static ReportCliResult ParseExport(ReportCommandDefinition definition, ParsedTokens parsed)
+    {
+        if (parsed.Positionals.Count > 2)
+            return TooManyPositionals(definition);
+
+        var seasonText = GetOption(parsed, "season") ?? GetSinglePositional(parsed, 0);
+        if (!TryRequiredPositiveInt(seasonText, "season", out var season, out var error))
+            return Missing(definition, error!);
+
+        var leagueId = LeagueId(parsed, positionalIndex: 1);
+        return Invoke(ReportCommand.Export, new ExportCommandOptions(season, leagueId));
+    }
+
+    private static ReportCliResult ParseSiteData(ReportCommandDefinition definition, ParsedTokens parsed)
+    {
+        if (parsed.Positionals.Count > 0)
+            return TooManyPositionals(definition);
+
+        return Invoke(ReportCommand.SiteData, new SiteDataCommandOptions());
     }
 
     private static ParsedTokens ParseTokens(ReportCommandDefinition definition, IReadOnlyList<string> args)
@@ -430,7 +496,7 @@ internal static class ReportCli
                 "keepers --username <username> [--league-id <id>]",
                 [new("--username, -u <username>", "Sleeper username to analyze."), league, help],
                 ["keepers <username> [league_id]"],
-                ["keepers --username robfoulk", "keepers robfoulk"],
+                ["keepers --username rob", "keepers rob"],
                 ["Writes a console report only."],
                 ["Uses Foundry for AI second opinions when configured; otherwise the deterministic report still runs."]),
             new(
@@ -463,7 +529,7 @@ internal static class ReportCli
                 "team --username <username> [--league-id <id>]",
                 [new("--username, -u <username>", "Sleeper username to analyze."), league, help],
                 ["team <username> [league_id]"],
-                ["team --username robfoulk"],
+                ["team --username rob"],
                 ["Writes a console report only."],
                 ["Uses Foundry for AI draft outlooks when configured; otherwise deterministic player sections still run."]),
             new(
@@ -500,6 +566,40 @@ internal static class ReportCli
                 ["Writes recaps/{season}/season.md, manifest.json, season sidecars, and chart SVGs."],
                 ["The positional form 'season 2025' now means season 2025 for the default league."]),
             new(
+                ReportCommand.CopilotReplay,
+                75,
+                "copilot-replay",
+                "Replay historical weekly recaps with Copilot and compare them blindly.",
+                "copilot-replay [--season <year>] [--start-week <week>] [--end-week <week>] [--league-id <id>] [--run-id <id>]",
+                [
+                    season,
+                    new("--start-week <week>", "First week to replay. Default: 1."),
+                    new("--end-week <week>", "Last week to replay. Default: 3."),
+                    new("--league-id, -l <id>", "Historical Sleeper league ID. Default: 1180276953741729792."),
+                    new("--run-id <id>", "Optional immutable run directory name."),
+                    help
+                ],
+                [],
+                ["copilot-replay", "copilot-replay --season 2025 --start-week 1 --end-week 3"],
+                ["Writes immutable local artifacts under recap-runs/{season}/{run-id}/."],
+                ["Never modifies recaps/{season}. Requires a logged-in GitHub Copilot user."]),
+            new(
+                ReportCommand.CopilotProofread,
+                76,
+                "copilot-proofread",
+                "Spike a fast/cheap model as a proofreading agent on a replay run.",
+                "copilot-proofread --run-id <id> [--season <year>] [--model <name>]",
+                [
+                    new("--run-id <id>", "Required replay run directory name to proofread."),
+                    season,
+                    new("--model <name>", "Proofreader model name. Default: gpt-5-mini."),
+                    help
+                ],
+                [],
+                ["copilot-proofread --run-id pilot-2025-w01-w03-v2 --model gpt-5-mini"],
+                ["Writes proofread-{model}.md under recap-runs/{season}/{run-id}/."],
+                ["Evaluates how effectively a cheap model catches factual defects."]),
+            new(
                 ReportCommand.RostersHistory,
                 80,
                 "rosters-history",
@@ -509,7 +609,36 @@ internal static class ReportCli
                 ["rosters-history <season> [league_id]"],
                 ["rosters-history --season 2025"],
                 ["Writes datafiles/{season}/week-NN.json."],
-                [])
+                []),
+            new(
+                ReportCommand.Export,
+                110,
+                "export",
+                "Dump a season's draft board, keepers, rosters, and schedule as JSON.",
+                "export --season <year> [--league-id <id>]",
+                [season, league, help],
+                ["export <season> [league_id]"],
+                ["export --season 2026"],
+                ["Writes recaps/{season}/export.json."],
+                [
+                    "A raw data dump for in-session analysis. It grades nothing.",
+                    "Keepers come from Sleeper's is_keeper flag, cross-checked against the prior season's rosters.",
+                    "Player SearchRank is a market proxy, not a sourced ADP."
+                ]),
+            new(
+                ReportCommand.SiteData,
+                120,
+                "site-data",
+                "Merge every season's sidecars into the site's league data file.",
+                "site-data",
+                [help],
+                null,
+                ["site-data"],
+                ["Writes site/src/data/league.json."],
+                [
+                    "The site renders standings, scores, and records from this file, never from parsed prose.",
+                    "A franchise is a roster slot and survives an ownership change; an owner keeps only his own seasons."
+                ])
         ];
     }
 }
@@ -540,7 +669,23 @@ internal sealed record WeeklyRecapCommandOptions(int Week, string LeagueId, int?
 
 internal sealed record SeasonRecapCommandOptions(string LeagueId, int? Season) : IReportCommandOptions;
 
+internal sealed record CopilotReplayCommandOptions(
+    string LeagueId,
+    int Season,
+    int StartWeek,
+    int EndWeek,
+    string? RunId) : IReportCommandOptions;
+
+internal sealed record CopilotProofreadCommandOptions(
+    int Season,
+    string RunId,
+    string Model) : IReportCommandOptions;
+
 internal sealed record RostersHistoryCommandOptions(int Season, string LeagueId) : IReportCommandOptions;
+
+internal sealed record ExportCommandOptions(int Season, string LeagueId) : IReportCommandOptions;
+
+internal sealed record SiteDataCommandOptions : IReportCommandOptions;
 
 internal enum ReportCommand
 {
@@ -550,8 +695,12 @@ internal enum ReportCommand
     Team,
     Matchup,
     Recap,
+    CopilotReplay,
+    CopilotProofread,
     Season,
-    RostersHistory
+    RostersHistory,
+    Export,
+    SiteData
 }
 
 internal sealed record ReportCommandDefinition(

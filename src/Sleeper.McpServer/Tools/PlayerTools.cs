@@ -66,9 +66,12 @@ public class PlayerTools
     public static async Task<string> SearchPlayers(
         IAnalysisService analysis,
         [Description("Player name or partial name")] string query,
-        [Description("Position filter (QB, RB, WR, TE, K, DEF)")] string? position = null)
+        [Description("Position filter (QB, RB, WR, TE, K, DEF)")] string? position = null,
+        CancellationToken ct = default)
     {
-        var results = await analysis.SearchPlayersAsync(query, position);
+        if (string.IsNullOrWhiteSpace(query)) return "Error: Query is required.";
+
+        var results = await analysis.SearchPlayersAsync(query, position, ct);
         if (results.Count == 0) return $"No players found matching '{query}'.";
 
         var sb = new StringBuilder();
