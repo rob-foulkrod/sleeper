@@ -14,9 +14,6 @@ namespace Sleeper.RosterReport.Copilot;
 /// </remarks>
 internal sealed class ReportAgentProvider : IAsyncDisposable
 {
-    /// <summary>Fast, cheap model used only to check drafts against the fact cards.</summary>
-    private const string ProofreaderModel = "gpt-5-mini";
-
     private const string ProofreaderInstructions =
         "You are a strict, fast factual proofreader for a fantasy football recap newsletter. " +
         "Compare the supplied draft markdown recap against the game data and COMPUTED MATCHUP FACTS. " +
@@ -26,13 +23,19 @@ internal sealed class ReportAgentProvider : IAsyncDisposable
         "No markdown fences or commentary outside the JSON.";
 
     private readonly CopilotAgentHost? _host;
+    private readonly CopilotAgentSettings _copilotSettings;
 
     public string Backend { get; }
     public CopilotUsageLedger Usage { get; }
 
-    private ReportAgentProvider(CopilotAgentHost? host, CopilotUsageLedger usage, string backend)
+    private ReportAgentProvider(
+        CopilotAgentHost? host,
+        CopilotAgentSettings copilotSettings,
+        CopilotUsageLedger usage,
+        string backend)
     {
         _host = host;
+        _copilotSettings = copilotSettings;
         Usage = usage;
         Backend = backend;
     }
@@ -44,14 +47,18 @@ internal sealed class ReportAgentProvider : IAsyncDisposable
         var usage = new CopilotUsageLedger();
         try
         {
-            var host = await CopilotAgentHost.StartAsync(copilotSettings, usage, ct).ConfigureAwait(false);
-            Console.WriteLine($"  (Copilot agents online: writer '{copilotSettings.WriterModel}', proofreader '{ProofreaderModel}')");
-            return new ReportAgentProvider(host, usage, "copilot");
+            var host = await CopilotAgentHost.StartAsync(
+                copilotSettings,
+                usage,
+                ct,
+                requireEvaluatorModel: false).ConfigureAwait(false);
+            Console.WriteLine($"  (Copilot agents online: game writer '{copilotSettings.WriterModel}', league writer '{copilotSettings.LeagueWriterModel}', proofreader '{copilotSettings.ProofreaderModel}')");
+            return new ReportAgentProvider(host, copilotSettings, usage, "copilot");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"  (Copilot unavailable: {ex.Message})");
-            return new ReportAgentProvider(null, usage, "none");
+            return new ReportAgentProvider(null, copilotSettings, usage, "none");
         }
     }
 
@@ -64,9 +71,9 @@ internal sealed class ReportAgentProvider : IAsyncDisposable
         {
             return RecapAgent.Create(
                 _host.CreateWriter(FoundryAgentInstructions.WeeklyGameAnalyst),
-                _host.CreateWriter(FoundryAgentInstructions.WeeklyLeagueAnalyst),
-                "copilot",
-                _host.CreateProofreader(ProofreaderInstructions, ProofreaderModel));
+                _host.CreateWriter(FoundryAgentInstructions.WeeklyLeagueAnalyst, _copilotSettings.LeagueWriterModel),
+                $"copilot:{_copilotSettings.WriterModel}+{_copilotSettings.LeagueWriterModel}",
+                _host.CreateProofreader(ProofreaderInstructions, _copilotSettings.ProofreaderModel));
         }
 
         return await RecapAgent.TryCreateAsync(foundrySettings, ct).ConfigureAwait(false);
@@ -78,7 +85,11 @@ internal sealed class ReportAgentProvider : IAsyncDisposable
         CancellationToken ct = default)
     {
         if (_host is not null)
-            return SeasonAgent.Create(_host.CreateWriter(FoundryAgentInstructions.SeasonAnalyst), "copilot");
+        {
+            return SeasonAgent.Create(
+                _host.CreateWriter(FoundryAgentInstructions.SeasonAnalyst, _copilotSettings.LeagueWriterModel),
+                $"copilot:{_copilotSettings.LeagueWriterModel}");
+        }
 
         return await SeasonAgent.TryCreateAsync(foundrySettings, ct).ConfigureAwait(false);
     }

@@ -4,88 +4,253 @@ namespace Sleeper.RosterReport.Recap;
 
 public enum GameNarrativeAngle
 {
-    BlowoutAutopsy,
-    NailBiterHeartbreak,
-    BenchDisasterMeltdown,
-    HighFlyingSlugfest,
-    DefensiveGrindout,
-    TacticalScout
+    StakesResult,
+    ResultFlippingBenchDecision,
+    CloseFinish,
+    StatementWin,
+    ScoringSurge,
+    LowOutputResult,
+    StraightRecap
+}
+
+public enum ExcitementLevel
+{
+    Routine = 1,
+    Notable = 2,
+    Major = 3,
+    Defining = 4
+}
+
+public sealed record MatchupDramaProfile(
+    ExcitementLevel Level,
+    string PrimarySignal,
+    IReadOnlyList<string> SecondarySignals,
+    string RecommendedLead,
+    int HumorAllowance,
+    bool ScopedSuperlativeAllowed,
+    string ConsequenceWeight)
+{
+    public string RenderPromptBlock()
+    {
+        var secondary = SecondarySignals.Count == 0
+            ? "none"
+            : string.Join("; ", SecondarySignals);
+        return $"""
+            <drama_profile>
+            Excitement level: {(int)Level} — {Level}
+            Primary story signal: {PrimarySignal}
+            Secondary signals: {secondary}
+            Recommended lead: {RecommendedLead}
+            Humor allowance: {HumorAllowance} sharp observation(s) maximum; zero is acceptable
+            Scoped superlative allowed: {(ScopedSuperlativeAllowed ? "yes, but only with the exact scope supplied by the facts" : "no")}
+            Consequence weight: {ConsequenceWeight}
+            Follow this calibration. Do not raise or lower the excitement level on your own.
+            </drama_profile>
+            """;
+    }
 }
 
 public sealed record MatchupNarrativeStyle(
     GameNarrativeAngle Angle,
+    MatchupDramaProfile Drama,
     string AngleInstruction,
     string StructureInstruction
 );
 
+public sealed record WeekDramaProfile(
+    ExcitementLevel Level,
+    string HeadlineEvent,
+    IReadOnlyList<string> RankedEvents)
+{
+    public string RenderPromptBlock()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<week_drama_profile>");
+        sb.AppendLine($"Week excitement level: {(int)Level} — {Level}");
+        sb.AppendLine($"Lead story: {HeadlineEvent}");
+        sb.AppendLine("Ranked supported events:");
+        foreach (var item in RankedEvents)
+            sb.AppendLine($"- {item}");
+        sb.AppendLine("Lead the Intro with the first event. Use later events only when they advance or complicate the weekly thesis.");
+        sb.AppendLine("</week_drama_profile>");
+        return sb.ToString();
+    }
+}
+
 /// <summary>
-/// Provides modular prompt assembly and dynamic narrative angle guidance for game recaps
-/// while preserving precomputed fact-card integrity and consistent weekly voice.
+/// Selects fact-grounded narrative emphasis and proportional excitement.
 /// </summary>
 public static class RecapPersonaEngine
 {
     public static MatchupNarrativeStyle DetermineStyle(MatchupFactCard card)
+        => DetermineStyle(card, null);
+
+    public static MatchupNarrativeStyle DetermineStyle(MatchupFactCard card, GameRecap? game)
     {
-        GameNarrativeAngle angle;
-        if (card.IsBlowout)
-        {
-            angle = GameNarrativeAngle.BlowoutAutopsy;
-        }
-        else if (card.Margin <= 5.0m)
-        {
-            angle = GameNarrativeAngle.NailBiterHeartbreak;
-        }
-        else if (card.LoserBenchFlipPossible)
-        {
-            angle = GameNarrativeAngle.BenchDisasterMeltdown;
-        }
-        else if (card.WinnerScoreRankInWeek <= 4 && card.LoserScoreRankInWeek <= 4)
-        {
-            angle = GameNarrativeAngle.HighFlyingSlugfest;
-        }
-        else if (card.WinnerScoreRankInWeek >= 5 && card.LoserScoreRankInWeek >= 5)
-        {
-            angle = GameNarrativeAngle.DefensiveGrindout;
-        }
-        else
-        {
-            angle = GameNarrativeAngle.TacticalScout;
-        }
+        var drama = DetermineDrama(card, game);
+        var angle = DetermineAngle(card, game);
 
         return new MatchupNarrativeStyle(
             angle,
+            drama,
             GetAngleInstruction(angle),
-            GetStructureInstruction(angle)
-        );
+            GetStructureInstruction(drama));
+    }
+
+    public static WeekDramaProfile DetermineWeekProfile(
+        RecapEnvelope env,
+        IReadOnlyList<(GameRecap Game, MatchupFactCard Facts, MatchupDramaProfile Drama)> games)
+    {
+        var ranked = games
+            .OrderByDescending(item => item.Drama.Level)
+            .ThenByDescending(item => item.Game.StoryImportance)
+            .ThenBy(item => item.Facts.Margin)
+            .ThenByDescending(item => item.Facts.WinnerScore)
+            .Select(item =>
+                $"{item.Facts.WinnerTeamName} over {item.Facts.LoserTeamName}: {item.Drama.PrimarySignal}; " +
+                $"{item.Facts.ExactConsequenceCloser}")
+            .ToList();
+
+        if (ranked.Count == 0)
+            return new WeekDramaProfile(ExcitementLevel.Routine, "No completed matchups were supplied.", []);
+
+        var level = games.Max(item => item.Drama.Level);
+        return new WeekDramaProfile(level, ranked[0], ranked);
+    }
+
+    private static MatchupDramaProfile DetermineDrama(MatchupFactCard card, GameRecap? game)
+    {
+        var signals = new List<string>();
+        var importance = game?.StoryImportance ?? 1;
+        var importanceReason = game?.StoryImportanceReason;
+        var isDefiningStakes = importance >= 5
+            || game?.SeasonContext == "playoffs_winners"
+            || string.Equals(game?.PlayoffRound, "Championship", StringComparison.OrdinalIgnoreCase);
+        var isMajorStakes = importance >= 4;
+        var forecastUpset = card.PriorForecastGradingNote?.Contains("INCORRECTLY", StringComparison.Ordinal) == true;
+
+        if (card.LoserBenchFlipPossible)
+            signals.Add("a verified optimal lineup would have changed the winner");
+        if (card.Margin <= 5m)
+            signals.Add($"the margin was {card.Margin:F2} points");
+        if (card.IsBlowout)
+            signals.Add($"the margin was {card.Margin:F2} points");
+        if (card.WinnerScoreRankInWeek == 1)
+            signals.Add("the winner posted the week's highest score");
+        if (forecastUpset)
+            signals.Add("the result overturned the supplied prior forecast");
+        if (!string.IsNullOrWhiteSpace(importanceReason))
+            signals.Add(importanceReason);
+
+        ExcitementLevel level;
+        string primary;
+        string lead;
+        string consequence;
+
+        if (isDefiningStakes)
+        {
+            level = ExcitementLevel.Defining;
+            primary = importanceReason ?? "the result carried defining playoff or season stakes";
+            lead = "Lead with the consequence, then state the result.";
+            consequence = "The verified season consequence is the center of the story.";
+        }
+        else if (isMajorStakes || card.Margin <= 5m || card.LoserBenchFlipPossible || forecastUpset)
+        {
+            level = ExcitementLevel.Major;
+            primary = card.LoserBenchFlipPossible
+                ? "a verified result-flipping lineup decision"
+                : card.Margin <= 5m
+                    ? $"a {card.Margin:F2}-point finish"
+                    : forecastUpset
+                        ? "a result that overturned the supplied forecast"
+                        : importanceReason ?? "meaningful standings or rivalry stakes";
+            lead = card.LoserBenchFlipPossible
+                ? "Lead with the result-flipping lineup fact."
+                : card.Margin <= 5m
+                    ? "Lead with the exact margin; do not invent late-game chronology."
+                    : "Lead with the verified stakes or upset.";
+            consequence = "Make the standings, streak, playoff, or keeper consequence prominent.";
+        }
+        else if (card.IsBlowout || card.WinnerScoreRankInWeek <= 2 || importance >= 3)
+        {
+            level = ExcitementLevel.Notable;
+            primary = card.IsBlowout
+                ? $"a decisive {card.Margin:F2}-point win"
+                : card.WinnerScoreRankInWeek <= 2
+                    ? $"the winner's score ranked #{card.WinnerScoreRankInWeek} this week"
+                    : importanceReason ?? "a useful standings consequence";
+            lead = card.WinnerScoreRankInWeek <= 2
+                ? "Lead with the score or defining player performance."
+                : "Lead with the result and its clearest consequence.";
+            consequence = "Explain why the result matters next without overstating it.";
+        }
+        else
+        {
+            level = ExcitementLevel.Routine;
+            primary = "a straightforward weekly result";
+            lead = "Lead with the result or best player.";
+            consequence = "Keep the consequence factual and brief.";
+        }
+
+        var secondary = signals
+            .Where(signal => !primary.Contains(signal, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(3)
+            .ToList();
+
+        return new MatchupDramaProfile(
+            level,
+            primary,
+            secondary,
+            lead,
+            level switch
+            {
+                ExcitementLevel.Routine => 0,
+                ExcitementLevel.Notable => 1,
+                _ => 2
+            },
+            card.WinnerScoreRankInWeek == 1 || isDefiningStakes,
+            consequence);
+    }
+
+    private static GameNarrativeAngle DetermineAngle(MatchupFactCard card, GameRecap? game)
+    {
+        if ((game?.StoryImportance ?? 0) >= 4
+            || (game is not null && game.SeasonContext != "regular"))
+            return GameNarrativeAngle.StakesResult;
+        if (card.LoserBenchFlipPossible)
+            return GameNarrativeAngle.ResultFlippingBenchDecision;
+        if (card.Margin <= 5m)
+            return GameNarrativeAngle.CloseFinish;
+        if (card.IsBlowout)
+            return GameNarrativeAngle.StatementWin;
+        if (card.WinnerScoreRankInWeek <= 4 && card.LoserScoreRankInWeek <= 4)
+            return GameNarrativeAngle.ScoringSurge;
+        if (card.WinnerScoreRankInWeek >= 5 && card.LoserScoreRankInWeek >= 5)
+            return GameNarrativeAngle.LowOutputResult;
+        return GameNarrativeAngle.StraightRecap;
     }
 
     private static string GetAngleInstruction(GameNarrativeAngle angle) => angle switch
     {
-        GameNarrativeAngle.BlowoutAutopsy =>
-            "NARRATIVE ANGLE (Blowout Autopsy): Focus on total dominance. Highlight how the winner overwhelmed the loser from kickoff to final whistle.",
-        GameNarrativeAngle.NailBiterHeartbreak =>
-            "NARRATIVE ANGLE (Nail-Biter Heartbreak): Frame as a razor-thin finish where every late yard or stat correction was decisive.",
-        GameNarrativeAngle.BenchDisasterMeltdown =>
-            "NARRATIVE ANGLE (Bench Disaster Meltdown): Put start/sit decisions under the microscope — points left on the pine cost the game.",
-        GameNarrativeAngle.HighFlyingSlugfest =>
-            "NARRATIVE ANGLE (High-Flying Slugfest): Highlight offensive firepower and elite individual hero performances from both squads.",
-        GameNarrativeAngle.DefensiveGrindout =>
-            "NARRATIVE ANGLE (Defensive Grindout): Treat as a sluggish, low-scoring war of attrition where points were hard to come by.",
-        _ => "NARRATIVE ANGLE (Tactical Matchup Breakdown): Focus on positional matchups, roster efficiency, and key turning points."
+        GameNarrativeAngle.StakesResult =>
+            "NARRATIVE ANGLE (Stakes Result): Make the verified playoff, standings, streak, record, rivalry, or keeper consequence the organizing idea.",
+        GameNarrativeAngle.ResultFlippingBenchDecision =>
+            "NARRATIVE ANGLE (Result-Flipping Bench Decision): Explain the eligible start/sit alternative that would have changed the winner. Critique the result without inventing the owner's reasoning.",
+        GameNarrativeAngle.CloseFinish =>
+            "NARRATIVE ANGLE (Close Finish): Use the exact margin to create tension. Do not invent when the lead changed or which NFL play decided it.",
+        GameNarrativeAngle.StatementWin =>
+            "NARRATIVE ANGLE (Statement Win): Show the scale of the verified margin and the production that created it without pretending the winner led throughout.",
+        GameNarrativeAngle.ScoringSurge =>
+            "NARRATIVE ANGLE (Scoring Surge): Celebrate the verified production from both teams, then explain the separation.",
+        GameNarrativeAngle.LowOutputResult =>
+            "NARRATIVE ANGLE (Low-Output Result): Be concise and clear about which usable production separated two modest totals.",
+        _ =>
+            "NARRATIVE ANGLE (Straight Recap): Center the result, the most important player contribution, and the concrete consequence."
     };
 
-    private static string GetStructureInstruction(GameNarrativeAngle angle) => angle switch
-    {
-        GameNarrativeAngle.BlowoutAutopsy =>
-            "FORMAT & FLOW: Write 2 punchy paragraphs. Start with a bold headline (`**Headline.**`). Para 1: Dominant scoreline & hero performance. Para 2: Summary of the margin and standings fallout.",
-        GameNarrativeAngle.NailBiterHeartbreak =>
-            "FORMAT & FLOW: Write 2-3 fast-paced paragraphs. Start with a bold headline (`**Headline.**`). Focus on late-game tension, key clutch plays, and close with the exact margin consequence.",
-        GameNarrativeAngle.BenchDisasterMeltdown =>
-            "FORMAT & FLOW: Write 2-3 paragraphs. Start with a bold headline (`**Headline.**`). Para 1: Game outcome. Para 2: Roster mismanagement & bench points. Para 3: Consequence closer.",
-        GameNarrativeAngle.HighFlyingSlugfest =>
-            "FORMAT & FLOW: Write 2-3 energetic paragraphs. Start with a bold headline (`**Headline.**`). Celebrate top point-producers before grounding the result in standings impact.",
-        GameNarrativeAngle.DefensiveGrindout =>
-            "FORMAT & FLOW: Write 2 concise paragraphs. Start with a bold headline (`**Headline.**`). Briefly analyze the low-scoring struggle and name the specific consequence.",
-        _ => "FORMAT & FLOW: Write 2-3 clean paragraphs. Start with a bold headline (`**Headline.**`). Provide a balanced recap covering outcome, key roster decisions, and standings impact."
-    };
+    private static string GetStructureInstruction(MatchupDramaProfile drama) =>
+        $"FORMAT & FLOW: Start with a specific bold headline and write 2-3 compact paragraphs. " +
+        $"{drama.RecommendedLead} State the result within the first two sentences. " +
+        "Vary the paragraph structure from adjacent matchup sections; do not mechanically march through every fact.";
 }

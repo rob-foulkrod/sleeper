@@ -70,6 +70,8 @@ internal sealed class CopilotRecapReplayRunner(
             startWeek,
             endWeek,
             settings.WriterModel,
+            settings.LeagueWriterModel,
+            settings.ProofreaderModel,
             settings.EvaluatorModel,
             settings.ReasoningEffort,
             typeof(GitHub.Copilot.CopilotClient).Assembly.GetName().Version?.ToString() ?? "unknown",
@@ -93,12 +95,12 @@ internal sealed class CopilotRecapReplayRunner(
                 "roster misattributions, and ungrounded claims. " +
                 "Return ONLY valid JSON matching: {\"Pass\": true/false, \"Defects\": [\"...\"]}. " +
                 "No markdown fences or commentary outside the JSON.",
-                "gpt-5-mini");
+                settings.ProofreaderModel);
 
             var recapAgent = RecapAgent.Create(
                 host.CreateWriter(FoundryAgentInstructions.WeeklyGameAnalyst),
-                host.CreateWriter(FoundryAgentInstructions.WeeklyLeagueAnalyst),
-                settings.WriterModel,
+                host.CreateWriter(FoundryAgentInstructions.WeeklyLeagueAnalyst, settings.LeagueWriterModel),
+                $"{settings.WriterModel}+{settings.LeagueWriterModel}",
                 proofreader);
             var evaluator = host.CreateEvaluator(EvaluatorInstructions);
 
@@ -249,18 +251,20 @@ internal sealed class CopilotRecapReplayRunner(
         var sb = new StringBuilder();
         sb.AppendLine($"Evaluate two Week {envelope.Meta.Week} recaps for {envelope.Meta.LeagueName}.");
         sb.AppendLine("The evidence JSON is authoritative. A confident but unsupported statement is a factual defect.");
-        sb.AppendLine("Score each candidate from 1-10 on factualAccuracy, coverage, continuity, specificity, writingCraft, entertainment, and houseStyle.");
+        sb.AppendLine("Score each candidate from 1-10 on factualAccuracy, matchupCoverage, weeklyNarrative, earnedExcitement, specificity, humor, structuralVariety, forecastUsefulness, houseStyle, and repetition. For repetition, 10 means varied and free of needless repetition.");
         sb.AppendLine("Return exactly this JSON shape:");
         sb.AppendLine("""
             {
               "candidateA": {
-                "factualAccuracy": 0, "coverage": 0, "continuity": 0,
-                "specificity": 0, "writingCraft": 0, "entertainment": 0, "houseStyle": 0,
+                "factualAccuracy": 0, "matchupCoverage": 0, "weeklyNarrative": 0,
+                "earnedExcitement": 0, "specificity": 0, "humor": 0,
+                "structuralVariety": 0, "forecastUsefulness": 0, "houseStyle": 0, "repetition": 0,
                 "overall": 0, "strengths": ["..."], "defects": ["..."]
               },
               "candidateB": {
-                "factualAccuracy": 0, "coverage": 0, "continuity": 0,
-                "specificity": 0, "writingCraft": 0, "entertainment": 0, "houseStyle": 0,
+                "factualAccuracy": 0, "matchupCoverage": 0, "weeklyNarrative": 0,
+                "earnedExcitement": 0, "specificity": 0, "humor": 0,
+                "structuralVariety": 0, "forecastUsefulness": 0, "houseStyle": 0, "repetition": 0,
                 "overall": 0, "strengths": ["..."], "defects": ["..."]
               },
               "preferredCandidate": "A",
@@ -349,8 +353,8 @@ internal sealed class CopilotRecapReplayRunner(
         sb.AppendLine();
         sb.AppendLine("## Average scores");
         sb.AppendLine();
-        sb.AppendLine("| Candidate | Factual | Coverage | Continuity | Specificity | Craft | Entertainment | House style | Overall | Defects |");
-        sb.AppendLine("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+        sb.AppendLine("| Candidate | Factual | Coverage | Weekly narrative | Earned excitement | Specificity | Humor | Variety | Forecast | House style | Repetition | Overall | Defects |");
+        sb.AppendLine("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
         AppendCandidateAverage(sb, "Copilot", pairs.Select(pair => pair.Copilot).ToList());
         AppendCandidateAverage(sb, "Foundry", pairs.Select(pair => pair.Foundry).ToList());
         sb.AppendLine();
@@ -368,12 +372,15 @@ internal sealed class CopilotRecapReplayRunner(
     {
         sb.AppendLine(
             $"| {name} | {candidates.Average(c => c.FactualAccuracy):0.0} | " +
-            $"{candidates.Average(c => c.Coverage):0.0} | " +
-            $"{candidates.Average(c => c.Continuity):0.0} | " +
+            $"{candidates.Average(c => c.MatchupCoverage):0.0} | " +
+            $"{candidates.Average(c => c.WeeklyNarrative):0.0} | " +
+            $"{candidates.Average(c => c.EarnedExcitement):0.0} | " +
             $"{candidates.Average(c => c.Specificity):0.0} | " +
-            $"{candidates.Average(c => c.WritingCraft):0.0} | " +
-            $"{candidates.Average(c => c.Entertainment):0.0} | " +
+            $"{candidates.Average(c => c.Humor):0.0} | " +
+            $"{candidates.Average(c => c.StructuralVariety):0.0} | " +
+            $"{candidates.Average(c => c.ForecastUsefulness):0.0} | " +
             $"{candidates.Average(c => c.HouseStyle):0.0} | " +
+            $"{candidates.Average(c => c.Repetition):0.0} | " +
             $"{candidates.Average(c => c.Overall):0.0} | " +
             $"{candidates.Sum(c => c.Defects.Count)} |");
     }
@@ -484,6 +491,8 @@ internal sealed record CopilotReplayManifest(
     int StartWeek,
     int EndWeek,
     string WriterModel,
+    string LeagueWriterModel,
+    string ProofreaderModel,
     string EvaluatorModel,
     string? ReasoningEffort,
     string SdkVersion,
@@ -517,12 +526,15 @@ internal sealed record QualityEvaluation(
 
 internal sealed record QualityCandidate(
     decimal FactualAccuracy,
-    decimal Coverage,
-    decimal Continuity,
+    decimal MatchupCoverage,
+    decimal WeeklyNarrative,
+    decimal EarnedExcitement,
     decimal Specificity,
-    decimal WritingCraft,
-    decimal Entertainment,
+    decimal Humor,
+    decimal StructuralVariety,
+    decimal ForecastUsefulness,
     decimal HouseStyle,
+    decimal Repetition,
     decimal Overall,
     List<string> Strengths,
     List<string> Defects);

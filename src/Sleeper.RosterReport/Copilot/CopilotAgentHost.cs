@@ -26,7 +26,8 @@ internal sealed class CopilotAgentHost : IAsyncDisposable
         CopilotAgentSettings settings,
         CopilotUsageLedger usage,
         CancellationToken cancellationToken = default,
-        bool skipModelVerification = false)
+        bool skipModelVerification = false,
+        bool requireEvaluatorModel = true)
     {
         var copilotHome = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -47,12 +48,18 @@ internal sealed class CopilotAgentHost : IAsyncDisposable
             {
                 var models = await client.ListModelsAsync(cancellationToken).ConfigureAwait(false);
                 var available = models.Select(model => model.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                if (!available.Contains(settings.WriterModel))
-                    throw new InvalidOperationException($"Copilot writer model '{settings.WriterModel}' is unavailable. Available models: {string.Join(", ", available.Order())}");
-                if (!available.Contains(settings.EvaluatorModel))
-                    throw new InvalidOperationException($"Copilot evaluator model '{settings.EvaluatorModel}' is unavailable. Available models: {string.Join(", ", available.Order())}");
-                if (string.Equals(settings.WriterModel, settings.EvaluatorModel, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("WriterModel and EvaluatorModel must differ for the blind spike.");
+                VerifyModel(available, settings.WriterModel, "writer");
+                VerifyModel(available, settings.LeagueWriterModel, "league writer");
+                VerifyModel(available, settings.ProofreaderModel, "proofreader");
+                if (requireEvaluatorModel)
+                {
+                    VerifyModel(available, settings.EvaluatorModel, "evaluator");
+                    if (string.Equals(settings.WriterModel, settings.EvaluatorModel, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(settings.LeagueWriterModel, settings.EvaluatorModel, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidOperationException("Writer models and EvaluatorModel must differ for the blind spike.");
+                    }
+                }
             }
 
             return new CopilotAgentHost(client, settings, usage);
@@ -64,10 +71,10 @@ internal sealed class CopilotAgentHost : IAsyncDisposable
         }
     }
 
-    public IReportTextAgent CreateWriter(string instructions)
+    public IReportTextAgent CreateWriter(string instructions, string? model = null)
         => new CopilotReportTextAgent(
             _client,
-            _settings.WriterModel,
+            model ?? _settings.WriterModel,
             _settings.ReasoningEffort,
             TimeSpan.FromSeconds(_settings.TimeoutSeconds),
             instructions,
@@ -90,6 +97,12 @@ internal sealed class CopilotAgentHost : IAsyncDisposable
             TimeSpan.FromSeconds(_settings.TimeoutSeconds),
             instructions,
             _usage);
+
+    private static void VerifyModel(IReadOnlySet<string> available, string model, string role)
+    {
+        if (!available.Contains(model))
+            throw new InvalidOperationException($"Copilot {role} model '{model}' is unavailable. Available models: {string.Join(", ", available.Order())}");
+    }
 
     public ValueTask DisposeAsync() => _client.DisposeAsync();
 }

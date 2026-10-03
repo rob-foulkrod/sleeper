@@ -6,36 +6,39 @@ namespace Sleeper.RosterReport.Tests;
 public class RecapPersonaEngineTests
 {
     [Fact]
-    public void DetermineStyle_IdentifiesBlowoutAutopsy_WhenMarginIs30OrMore()
+    public void DetermineStyle_IdentifiesStatementWin_WhenMarginIs30OrMore()
     {
         var card = CreateSampleCard(margin: 35.0m, isBlowout: true);
         var style = RecapPersonaEngine.DetermineStyle(card);
 
-        Assert.Equal(GameNarrativeAngle.BlowoutAutopsy, style.Angle);
-        Assert.Contains("Blowout Autopsy", style.AngleInstruction);
-        Assert.Contains("Write 2 punchy paragraphs", style.StructureInstruction);
+        Assert.Equal(GameNarrativeAngle.StatementWin, style.Angle);
+        Assert.Equal(ExcitementLevel.Notable, style.Drama.Level);
+        Assert.Contains("Statement Win", style.AngleInstruction);
+        Assert.Contains("2-3 compact paragraphs", style.StructureInstruction);
     }
 
     [Fact]
-    public void DetermineStyle_IdentifiesNailBiter_WhenMarginIs5OrLess()
+    public void DetermineStyle_IdentifiesCloseFinish_WhenMarginIs5OrLess()
     {
         var card = CreateSampleCard(margin: 3.5m, isBlowout: false);
         var style = RecapPersonaEngine.DetermineStyle(card);
 
-        Assert.Equal(GameNarrativeAngle.NailBiterHeartbreak, style.Angle);
-        Assert.Contains("Nail-Biter Heartbreak", style.AngleInstruction);
-        Assert.Contains("late-game tension", style.StructureInstruction);
+        Assert.Equal(GameNarrativeAngle.CloseFinish, style.Angle);
+        Assert.Equal(ExcitementLevel.Major, style.Drama.Level);
+        Assert.Contains("Close Finish", style.AngleInstruction);
+        Assert.Contains("do not invent late-game chronology", style.Drama.RecommendedLead);
     }
 
     [Fact]
-    public void DetermineStyle_IdentifiesBenchDisaster_WhenBenchFlipIsPossible()
+    public void DetermineStyle_IdentifiesResultFlippingDecision_WhenBenchFlipIsPossible()
     {
         var card = CreateSampleCard(margin: 12.0m, isBlowout: false, benchFlipPossible: true);
         var style = RecapPersonaEngine.DetermineStyle(card);
 
-        Assert.Equal(GameNarrativeAngle.BenchDisasterMeltdown, style.Angle);
-        Assert.Contains("Bench Disaster Meltdown", style.AngleInstruction);
-        Assert.Contains("bench points", style.StructureInstruction);
+        Assert.Equal(GameNarrativeAngle.ResultFlippingBenchDecision, style.Angle);
+        Assert.Equal(ExcitementLevel.Major, style.Drama.Level);
+        Assert.Contains("Result-Flipping Bench Decision", style.AngleInstruction);
+        Assert.Contains("result-flipping lineup fact", style.Drama.RecommendedLead);
     }
 
     private static MatchupFactCard CreateSampleCard(decimal margin, bool isBlowout, bool benchFlipPossible = false)

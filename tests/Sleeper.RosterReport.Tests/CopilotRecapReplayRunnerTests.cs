@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Sleeper.RosterReport.Copilot;
 
 namespace Sleeper.RosterReport.Tests;
@@ -47,5 +48,40 @@ public class CopilotRecapReplayRunnerTests
             if (Directory.Exists(root))
                 Directory.Delete(root, recursive: true);
         }
+    }
+
+    [Fact]
+    public void AgentSettings_UseQualityOrientedDefaults()
+    {
+        var configuration = new ConfigurationBuilder().Build();
+
+        var settings = CopilotAgentSettings.FromConfiguration(configuration);
+
+        settings.WriterModel.Should().Be("claude-sonnet-5.5");
+        settings.LeagueWriterModel.Should().Be("claude-opus-5.5");
+        settings.ProofreaderModel.Should().Be("gpt-5-mini");
+        settings.EvaluatorModel.Should().Be("gpt-5.6-sol");
+    }
+
+    [Fact]
+    public void AgentSettings_AllowEveryModelRoleToBeOverridden()
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["Copilot:WriterModel"] = "game-model",
+            ["Copilot:LeagueWriterModel"] = "league-model",
+            ["Copilot:ProofreaderModel"] = "proofreader-model",
+            ["Copilot:EvaluatorModel"] = "evaluator-model"
+        };
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(values)
+            .Build();
+
+        var settings = CopilotAgentSettings.FromConfiguration(configuration);
+
+        settings.WriterModel.Should().Be("game-model");
+        settings.LeagueWriterModel.Should().Be("league-model");
+        settings.ProofreaderModel.Should().Be("proofreader-model");
+        settings.EvaluatorModel.Should().Be("evaluator-model");
     }
 }

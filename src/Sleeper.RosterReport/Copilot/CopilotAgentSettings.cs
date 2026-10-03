@@ -4,6 +4,8 @@ namespace Sleeper.RosterReport.Copilot;
 
 internal sealed record CopilotAgentSettings(
     string WriterModel,
+    string LeagueWriterModel,
+    string ProofreaderModel,
     string EvaluatorModel,
     string? ReasoningEffort,
     int TimeoutSeconds,
@@ -15,7 +17,9 @@ internal sealed record CopilotAgentSettings(
     {
         var section = configuration.GetSection(SectionName);
         return new CopilotAgentSettings(
-            WriterModel: section["WriterModel"] ?? "claude-sonnet-5",
+            WriterModel: section["WriterModel"] ?? "claude-sonnet-5.5",
+            LeagueWriterModel: section["LeagueWriterModel"] ?? "claude-opus-5.5",
+            ProofreaderModel: section["ProofreaderModel"] ?? "gpt-5-mini",
             EvaluatorModel: section["EvaluatorModel"] ?? "gpt-5.6-sol",
             ReasoningEffort: section["ReasoningEffort"] ?? "medium",
             TimeoutSeconds: PositiveInt(section["TimeoutSeconds"], 180),
