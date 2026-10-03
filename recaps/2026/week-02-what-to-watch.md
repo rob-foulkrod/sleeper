@@ -11,7 +11,7 @@ _The League, 2026. Filed September 21 before kickoff. Scores and starter assignm
 
 One NFL game remains: **Giants at Rams, Monday at 8:15 p.m. Eastern on ESPN/ABC**. All four fantasy matchups still have starters involved. The September 15 column picked **Rob, Michael, Travon, and Eric**. Those calls remain on the record, even where Monday's arithmetic has become deeply inconvenient.
 
-Read the unchanged [original Week 2 predictions](/sleeper/2026/week-02-preview/).
+Read the [original Week 2 predictions](/sleeper/2026/week-02-preview/).
 
 ## The Monday Card
 
