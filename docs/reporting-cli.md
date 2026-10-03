@@ -167,7 +167,7 @@ To include the same weekly injury report in the recap envelope, league commentar
 dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- recap --week 1 --season 2026 --injury-start 2026-09-09T00:00:00-04:00 --injury-end 2026-09-16T00:00:00-04:00
 ```
 
-The injury subsection belongs within League Themes. The data-only fallback also includes the full evidence report. Existing invocations without injury options remain valid and do not query the injury ledger. If an explicitly requested injury report cannot be built, the recap fails instead of silently omitting it. Historical reports require that season's league ID.
+The injury subsection belongs within Around the League. The data-only fallback also includes the full evidence report. Existing invocations without injury options remain valid and do not query the injury ledger. If an explicitly requested injury report cannot be built, the recap fails instead of silently omitting it. Historical reports require that season's league ID.
 
 Output:
 
@@ -175,7 +175,7 @@ Output:
 recaps/{season}/week-NN.md
 ```
 
-AI behavior: uses weekly recap Foundry agents when configured. If Foundry is not configured, the app writes a data-only markdown envelope dump for debugging.
+AI behavior: prefers the signed-in GitHub Copilot SDK session, with managed Foundry agents as a fallback. If neither backend is available, the app writes a data-only markdown envelope dump for debugging. Copilot uses the configured game writer for matchup sections, the league writer for league-wide synthesis, and the proofreader for factual checks. Deterministic drama profiles calibrate each matchup and the week from Routine through Defining so excitement follows verified stakes, margins, lineup swings, and scoring rather than free-form hype. Forecast output includes one capsule per matchup. When a proofreader is configured, a final synthesis pass may revise only narrative fragments; deterministic tables remain unchanged, and the revision is accepted only after a second factual check passes.
 
 ### `season`
 
@@ -233,13 +233,39 @@ recap-runs/{season}/{run-id}/
 
 Each run contains the exact input envelopes, Copilot recaps, blind evaluations,
 run manifest, and an `assistant.usage` ledger with tokens, duration, model
-multiplier cost, and nano-AIU reported by the SDK. AI units are telemetry rather
-than a dollar invoice or guaranteed premium-request count.
+multiplier cost, and nano-AIU reported by the SDK. Blind evaluations score factual
+accuracy, matchup coverage, weekly narrative, earned excitement, specificity,
+humor, structural variety, forecast usefulness, house style, repetition, and the
+overall result. AI units are telemetry rather than a dollar invoice or guaranteed
+premium-request count.
 
-The command uses the logged-in GitHub Copilot user. Writer and evaluator models,
-reasoning effort, timeout, and game-story concurrency are configured under the
-`Copilot` section in `appsettings.json`. The writer and evaluator models must
-differ.
+The command uses the logged-in GitHub Copilot user. Models, reasoning effort,
+timeout, and game-story concurrency are configured under the `Copilot` section in
+`appsettings.json`. The current quality-oriented lineup is:
+
+| Role | Configuration key | Default model | Purpose |
+| --- | --- | --- | --- |
+| Game writer | `Copilot:WriterModel` | `claude-sonnet-5.5` | Writes the four structured matchup sections with strong quality and lower cost. |
+| League and season writer | `Copilot:LeagueWriterModel` | `claude-opus-5.5` | Uses the premium model where synthesis, voice, and editorial judgment matter most. |
+| Proofreader | `Copilot:ProofreaderModel` | `gpt-5-mini` | Checks generated prose against structured facts. |
+| Evaluator | `Copilot:EvaluatorModel` | `gpt-5.6-sol` | Blindly compares replay candidates using a different model family. |
+
+The evaluator must differ from both writer models for blind replay comparisons.
+Normal recap and season commands do not require the evaluator model to be
+available because they never call it.
+
+For a one-off comparison, override a role without editing committed configuration:
+
+```powershell
+$env:Copilot__LeagueWriterModel = 'claude-sonnet-5.5'
+dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- copilot-replay --run-id sonnet-only
+Remove-Item Env:\Copilot__LeagueWriterModel
+```
+
+The same double-underscore convention works for `WriterModel`, `ProofreaderModel`,
+and `EvaluatorModel`. GitHub's Copilot model roster changes frequently. Each run
+checks its required model IDs with the SDK's live model list and reports the
+available IDs if one has been retired.
 
 ### `rosters-history`
 
@@ -305,6 +331,33 @@ It also fails loudly rather than degrading: an award whose owner cannot be resol
 franchise with no current owner in the export, throws with the season and the award named.
 
 ## The weekly loop
+
+### Single-command agent closeout
+
+In **VS Code Copilot Chat**, invoke the repository's
+[week-end skill](../.github/skills/week-end/SKILL.md):
+
+```text
+/week-end 3 season 2026
+```
+
+This closes Week 3 and prepares Week 4: injury research, NFL/Sleeper results,
+roster snapshots, transaction audit, missing recap and preview articles, dated
+homepage data, editorial review, site build, tests, and local browser checks.
+It leaves a local preview running without committing or publishing.
+
+```text
+/week-end 3 season 2026 publish
+/week-end 3 season 2026 data-only
+```
+
+`publish` adds a scoped commit, push, and deployment verification after validation.
+`data-only` stops after evidence/datafile validation. With no arguments, the agent
+resolves the latest fully completed NFL week and current league season. These are
+Chat skill arguments, not terminal or reporting CLI flags. Existing filed articles,
+predictions, and weekly snapshots are reused unchanged; reruns fill missing work.
+External evidence or validation failures block publication. Week 17 requires a
+season-closeout outlook; the league has no Week 18 fantasy matchup preview.
 
 ### Current Weekly Editions
 

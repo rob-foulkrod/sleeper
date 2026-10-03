@@ -1,6 +1,6 @@
 # Foundry Agent Configuration
 
-The roster report uses managed, server-side Foundry agents for AI prose and player research. The app must know which Foundry project to use, which model deployment backs the agents, and what each managed agent is named.
+The roster report supports managed, server-side Foundry agents for AI prose and player research. Weekly and season recaps prefer the signed-in GitHub Copilot SDK session and use Foundry as a fallback; other Foundry-backed reports continue to use these settings directly. The app must know which Foundry project to use, which model deployment backs the agents, and what each managed agent is named.
 
 Configuration is resolved in this order:
 
