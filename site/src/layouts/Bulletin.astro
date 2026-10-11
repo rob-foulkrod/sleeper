@@ -1,5 +1,6 @@
 ---
 import '../styles/bulletin.css';
+import { CURRENT_EDITION, FIRST_QUARTER } from '../lib/league';
 
 interface Props {
   title: string;
@@ -12,12 +13,14 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const href = (p: string) => `${base}${p}`;
 const path = Astro.url.pathname.replace(/\/$/, '');
 const isHere = (p: string) => path === `${base}${p}` || (p !== '/' && path.startsWith(`${base}${p}`));
+const cues = CURRENT_EDITION?.editorial_cues;
 
 const nav = [
   { label: 'Front Page', to: '/' },
   { label: '2026', to: '/2026' },
   { label: '2025', to: '/2025' },
   { label: '2024', to: '/2024' },
+  ...(FIRST_QUARTER ? [{ label: 'Q1 Report', to: '/first-quarter' }] : []),
   { label: 'Teams', to: '/franchises' },
   { label: 'Record Book', to: '/records' },
   { label: 'Awards', to: '/awards' },
@@ -67,6 +70,7 @@ const nav = [
     <link rel="preload" as="font" type="font/woff2" href={href('/fonts/courier-prime-regular.woff2')} crossorigin />
     <link rel="preload" as="font" type="font/woff2" href={href('/fonts/courier-prime-bold.woff2')} crossorigin />
     <meta name="theme-color" content="#e5e3db" />
+    {cues?.generator && <meta name="generator" content={cues.generator} />}
     <script is:inline>
       try {
         const saved = localStorage.getItem('sheet');
@@ -88,7 +92,7 @@ const nav = [
           </button>
         </div>
         <p class="masthead__issue slug">
-          Eight teams · Keeper league · Run off from the record
+          {cues?.issue_line ?? 'Eight teams · Keeper league · Run off from the record'}
         </p>
       </div>
       <nav class="rail" aria-label="Sections">
@@ -120,6 +124,7 @@ const nav = [
           articles. Written recaps are drafted with assistance and checked against that data.
         </p>
         <p class="slug">Members are named by first name only. The written archive begins with the 2024 season.</p>
+        {cues?.colophon_note && <p class="slug">{cues.colophon_note}</p>}
       </div>
     </footer>
 

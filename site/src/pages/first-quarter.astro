@@ -1,0 +1,633 @@
+---
+import Bulletin from '../layouts/Bulletin.astro';
+import { FIRST_QUARTER, pts, pts1, type QuarterPlayer } from '../lib/league';
+
+const quarter = FIRST_QUARTER;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const totalTeamReport = quarter?.team_position_reports.find((report) => report.position === 'TOTAL');
+const weeklyPressure = quarter?.weekly_totals.map((week, index) => {
+  const scores = totalTeamReport?.rankings.map((team) => ({
+    team: team.team_name,
+    points: team.weekly_points[index],
+  })) ?? [];
+  const sorted = scores.slice().sort((a, b) => b.points - a.points);
+  const average = scores.reduce((sum, team) => sum + team.points, 0) / Math.max(scores.length, 1);
+  return {
+    week: week.week,
+    average,
+    high: sorted[0],
+    low: sorted.at(-1),
+    spread: (sorted[0]?.points ?? 0) - (sorted.at(-1)?.points ?? 0),
+    mvp: week.leaders.slice().sort((a, b) => b.points - a.points)[0],
+  };
+}) ?? [];
+const quarterTeamAverage = weeklyPressure.reduce((sum, week) => sum + week.average, 0)
+  / Math.max(weeklyPressure.length, 1);
+const pressureMin = Math.floor(Math.min(...weeklyPressure.map((week) => week.low?.points ?? 0)) / 10) * 10;
+const pressureMax = Math.ceil(Math.max(...weeklyPressure.map((week) => week.high?.points ?? 1)) / 10) * 10;
+const pressurePosition = (value: number) =>
+  ((value - pressureMin) / Math.max(pressureMax - pressureMin, 1)) * 100;
+const positionHeadlines: Record<string, string> = {
+  QB: 'Quarterback command',
+  RB: 'Backfield force',
+  WR: 'Wideout pressure',
+  TE: 'Tight end edge',
+  K: 'Points off the boot',
+  DEF: 'Defensive control',
+};
+
+const sparkline = (player: QuarterPlayer) => {
+  const values = player.weekly_points.slice(0, quarter?.through_week ?? 4);
+  const max = Math.max(...values, 1);
+  return values
+    .map((value, index) => {
+      const x = values.length === 1 ? 50 : (index / (values.length - 1)) * 100;
+      const y = 28 - (value / max) * 24;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+};
+---
+
+<Bulletin
+  title="First Quarter Report — The League"
+  slug={`The file · ${quarter?.season ?? 'Current season'} · Weeks 1–4`}
+  description="The first four weeks ranked by position using The League's custom fantasy scoring."
+>
+  {!quarter ? (
+    <div class="sheet unavailable">
+      <h1 class="ruled">First Quarter Report</h1>
+      <p>The report will appear after the first weekly edition is filed.</p>
+    </div>
+  ) : (
+    <>
+      <header class="sheet hero">
+        <div class="hero__copy">
+          <p class="slug"><span class="signal">●</span> {quarter.status === 'complete' ? 'Quarter closed' : `Live through Week ${quarter.through_week}`}</p>
+          <h1>Four weeks.<br /><span>One scoring system.</span></h1>
+          <p class="dek">
+            Every player and team defense is counted under <strong>The League’s actual rules</strong>.
+            This is the first-quarter field, ranked exactly as this league counts it.
+          </p>
+        </div>
+        <div class="hero__leader" aria-label="First quarter scoring leader">
+          <p class="slug">Scoring leader</p>
+          <strong class="hero__number">{pts1(quarter.overall_leaders[0]?.total_points)}</strong>
+          <p class="hero__name">{quarter.overall_leaders[0]?.player_name}</p>
+          <p class="slug">{quarter.overall_leaders[0]?.position} · {quarter.overall_leaders[0]?.team ?? 'FA'}</p>
+        </div>
+      </header>
+
+      <section class="sheet band pulse">
+        <div class="section-head">
+          <div>
+            <p class="slug">The scoring pulse</p>
+            <h2>How the quarter moved</h2>
+          </div>
+          <p>
+            The fantasy-team scoring range each week—from the low card to the high card—with
+            the league average marked inside it. This is where the quarter actually changed.
+          </p>
+        </div>
+        <div class="pressure-scale slug" aria-hidden="true">
+          <span>{pressureMin}</span>
+          <span>Fantasy-team points</span>
+          <span>{pressureMax}</span>
+        </div>
+        <div class="pressure-chart">
+          {weeklyPressure.map((week) => {
+            const delta = ((week.average - quarterTeamAverage) / quarterTeamAverage) * 100;
+            const lowPosition = pressurePosition(week.low?.points ?? 0);
+            const highPosition = pressurePosition(week.high?.points ?? 0);
+            const averagePosition = pressurePosition(week.average);
+            return (
+            <article class="pressure-week">
+              <div class="pressure-week__label">
+                <p class="slug">Week {week.week}</p>
+                <strong>{pts1(week.average)}</strong>
+                <span class:list={['pressure-week__delta', { down: delta < 0 }]}>
+                  {delta >= 0 ? '+' : ''}{delta.toFixed(1)}%
+                </span>
+              </div>
+              <div class="pressure-week__range">
+                <span
+                  class="pressure-week__line"
+                  style={`left:${lowPosition}%;width:${highPosition - lowPosition}%`}
+                ></span>
+                <span
+                  class="pressure-week__average"
+                  style={`left:${averagePosition}%`}
+                  title={`Week ${week.week} average: ${pts1(week.average)}`}
+                ></span>
+                <span class="pressure-week__low" style={`left:${lowPosition}%`}>
+                  <small>Low</small>{pts1(week.low?.points)}
+                </span>
+                <span class="pressure-week__high" style={`left:${highPosition}%`}>
+                  <small>High</small>{pts1(week.high?.points)}
+                </span>
+              </div>
+              <div class="pressure-week__notes">
+                <p><span class="slug">High card</span><strong>{week.high?.team}</strong></p>
+                <p><span class="slug">Spread</span><strong>{pts1(week.spread)}</strong></p>
+                <p><span class="slug">Player high</span><strong>{week.mvp?.player_name} · {pts1(week.mvp?.points)}</strong></p>
+              </div>
+            </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section class="sheet band">
+        <div class="section-head">
+          <div>
+            <p class="slug">The position race</p>
+            <h2>Choose the field</h2>
+          </div>
+          <p>
+            Switch positions to see who controlled each field from Week 1 through Week
+            {' '}{quarter.through_week}, with each weekly shape shown at right.
+          </p>
+        </div>
+        <div class="position-switcher" role="group" aria-label="Select a position">
+          {quarter.position_reports.map((report) => (
+            <button
+              type="button"
+              data-position-button={report.position}
+              aria-pressed={report.position === 'QB' ? 'true' : 'false'}
+            >
+              {report.position}
+            </button>
+          ))}
+        </div>
+        {quarter.position_reports.map((report) => (
+          <div class="race-panel" data-position-panel={report.position}>
+            <div class="race-panel__head">
+              <h3>{positionHeadlines[report.position] ?? `${report.position} leaders`}</h3>
+              <p class="slug">{report.player_count} scorers · leader {report.leader.player_name} at {pts1(report.leader.total_points)}</p>
+            </div>
+            <ol class="race">
+              {report.rankings.slice(0, 10).map((player) => (
+                <li>
+                  <span class="race__rank">{String(player.rank).padStart(2, '0')}</span>
+                  <span class="race__identity">
+                    <strong>{player.player_name}</strong>
+                    <span class="slug">{player.team ?? 'FA'} · {pts1(player.points_per_game)} per week</span>
+                  </span>
+                  <span class="race__track" aria-hidden="true">
+                    <span style={`width:${(player.total_points / (report.leader?.total_points || 1)) * 100}%`}></span>
+                  </span>
+                  <svg class="spark" viewBox="0 0 100 30" role="img" aria-label={`${player.player_name} weekly scoring trend`}>
+                    <polyline points={sparkline(player)} />
+                  </svg>
+                  <strong class="race__points">{pts1(player.total_points)}</strong>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ))}
+      </section>
+
+      <section class="sheet band">
+        <div class="section-head">
+          <div>
+            <p class="slug">Cross-position board</p>
+            <h2>The first-quarter dozen</h2>
+          </div>
+          <p>
+            Raw points answer who produced the most under this scoring system. Positional rank
+            remains the better comparison inside each role.
+          </p>
+        </div>
+        <ol class="overall-board">
+          {quarter.overall_leaders.map((player, index) => (
+            <li>
+              <span class="overall-board__rank">{index + 1}</span>
+              <span><strong>{player.player_name}</strong><small>{player.position}{player.rank} · {player.team ?? 'FA'}</small></span>
+              <strong>{pts1(player.total_points)}</strong>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section class="sheet band team-production">
+        <div class="section-head">
+          <div>
+            <p class="slug">Franchise production</p>
+            <h2>Who owns each position?</h2>
+          </div>
+          <p>
+            Starting-lineup points by fantasy team. “All” is each team’s official Week 1–{quarter.through_week}
+            scoring total; each position isolates only the starters used there.
+          </p>
+        </div>
+        <div class="position-switcher" role="group" aria-label="Select a fantasy team scoring category">
+          {quarter.team_position_reports.map((report) => (
+            <button
+              type="button"
+              data-team-position-button={report.position}
+              aria-pressed={report.position === 'TOTAL' ? 'true' : 'false'}
+            >
+              {report.position === 'TOTAL' ? 'ALL' : report.position}
+            </button>
+          ))}
+        </div>
+        {quarter.team_position_reports.map((report) => (
+          <div class="team-panel" data-team-position-panel={report.position}>
+            <div class="race-panel__head">
+              <h3>{report.position === 'TOTAL' ? 'Total team scoring' : `${report.position} scoring`}</h3>
+              {report.leader && (
+                <p class="slug">Leader · {report.leader.team_name} · {pts1(report.leader.total_points)}</p>
+              )}
+            </div>
+            <ol class="team-race">
+              {report.rankings.map((team) => (
+                <li>
+                  <span class="team-race__rank">{team.rank}</span>
+                  <span class="team-race__identity">
+                    <a href={`${base}/franchises/${team.roster_id}`}><strong>{team.team_name}</strong></a>
+                    <span class="slug">{team.owner_name} · {pts1(team.points_per_week)} per week</span>
+                  </span>
+                  <span class="team-race__weeks">
+                    {team.weekly_points.slice(0, quarter.through_week).map((points, index) => (
+                      <span><small>W{index + 1}</small>{pts1(points)}</span>
+                    ))}
+                  </span>
+                  <span class="race__track" aria-hidden="true">
+                    <span style={`width:${(team.total_points / (report.leader?.total_points || 1)) * 100}%`}></span>
+                  </span>
+                  <strong class="race__points">{pts1(team.total_points)}</strong>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ))}
+      </section>
+
+      <section class="sheet band">
+        <div class="section-head">
+          <div>
+            <p class="slug">Quarter marks · 12 findings</p>
+            <h2>What the totals conceal</h2>
+          </div>
+          <p>
+            Four files on the quarter: individual dominance, roster construction, lineup decisions,
+            and the schedule luck that changed records.
+          </p>
+        </div>
+        <div class="mark-switcher" role="group" aria-label="Select quarter mark category">
+          {quarter.mark_groups.map((group) => (
+            <button
+              type="button"
+              data-mark-group-button={group.group}
+              aria-pressed={group.group === 'Player' ? 'true' : 'false'}
+            >
+              <span>{group.group}</span>
+              <small>{group.marks.length} marks</small>
+            </button>
+          ))}
+        </div>
+        {quarter.mark_groups.map((group) => (
+          <section
+            class={`mark-file mark-file--${group.group.toLowerCase()}`}
+            data-mark-group-panel={group.group}
+            hidden={group.group !== 'Player'}
+          >
+            <header class="mark-file__head">
+              <p class="slug">File: {group.group}</p>
+              <strong>{String(group.marks.length).padStart(2, '0')}</strong>
+            </header>
+            <div class="marks">
+              {group.marks.map((mark, index) => (
+                <article>
+                  <p class="mark__index">0{index + 1}</p>
+                  <p class="struck">{mark.label}</p>
+                  <h3>{mark.subject}</h3>
+                  <p class="mark__number">{mark.display_value}</p>
+                  <p class="mark__detail">{mark.detail}</p>
+                  {mark.position && <span class="mark__position">{mark.position}</span>}
+                </article>
+              ))}
+            </div>
+          </section>
+        ))}
+      </section>
+
+      <section class="sheet band">
+        <div class="section-head">
+          <div>
+            <p class="slug">Every position</p>
+            <h2>Scoring ranks</h2>
+          </div>
+          <p>
+            Total points set the order; average, peak and weekly line explain how each player got there.
+            Expand any position for the complete first-quarter field.
+          </p>
+        </div>
+
+        <div class="position-switcher" role="group" aria-label="Select ranking position">
+          {quarter.position_reports.map((report) => (
+            <button
+              type="button"
+              data-position-button={report.position}
+              aria-pressed={report.position === 'QB' ? 'true' : 'false'}
+            >
+              {report.position}
+            </button>
+          ))}
+        </div>
+
+        {quarter.position_reports.map((report) => (
+          <section class="position" id={report.position.toLowerCase()} data-position-panel={report.position}>
+            <div class="position__head">
+              <div>
+                <p class="slug">{report.player_count} scorers ranked</p>
+                <h3>{report.position}</h3>
+              </div>
+              <p>
+                <span class="slug">Leader</span>
+                <strong>{report.leader.player_name}</strong> · {pts1(report.leader.total_points)}
+              </p>
+              <p>
+                <span class="slug">Top-10 average</span>
+                <strong>{pts1(report.top_ten_average)}</strong>
+              </p>
+            </div>
+            <div class="ledger-scroll">
+              <table class="ledger player-table">
+                <caption>{report.position} first-quarter scoring — Weeks 1–{quarter.through_week}</caption>
+                <thead>
+                  <tr>
+                    <th scope="col" class="num">Rank</th>
+                    <th scope="col">Player</th>
+                    <th scope="col">Team</th>
+                    {Array.from({ length: quarter.through_week }, (_, index) => <th scope="col" class="num">W{index + 1}</th>)}
+                    <th scope="col" class="num">Total</th>
+                    <th scope="col" class="num">Avg</th>
+                    <th scope="col" class="num">Peak</th>
+                    <th scope="col">Shape</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.rankings.slice(0, 10).map((player) => (
+                    <tr>
+                      <td class="num rank">{player.rank}</td>
+                      <th scope="row">{player.player_name}</th>
+                      <td>{player.team ?? 'FA'}</td>
+                      {player.weekly_points.slice(0, quarter.through_week).map((points) => <td class="num">{pts1(points)}</td>)}
+                      <td class="num total">{pts1(player.total_points)}</td>
+                      <td class="num">{pts1(player.points_per_game)}</td>
+                      <td class="num">{pts1(player.best_week_points)} <small>W{player.best_week}</small></td>
+                      <td>
+                        <svg class="spark" viewBox="0 0 100 30" role="img" aria-label={`${player.player_name} weekly scoring trend`}>
+                          <polyline points={sparkline(player)} />
+                        </svg>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {report.rankings.length > 10 && (
+              <details>
+                <summary>Ranks 11–{report.rankings.length}</summary>
+                <div class="ledger-scroll">
+                  <table class="ledger player-table player-table--continuation">
+                    <tbody>
+                      {report.rankings.slice(10).map((player) => (
+                        <tr>
+                          <td class="num rank">{player.rank}</td>
+                          <th scope="row">{player.player_name}</th>
+                          <td>{player.team ?? 'FA'}</td>
+                          {player.weekly_points.slice(0, quarter.through_week).map((points) => <td class="num">{pts1(points)}</td>)}
+                          <td class="num total">{pts1(player.total_points)}</td>
+                          <td class="num">{pts1(player.points_per_game)}</td>
+                          <td class="num">{pts1(player.best_week_points)} <small>W{player.best_week}</small></td>
+                          <td>
+                            <svg class="spark" viewBox="0 0 100 30" aria-hidden="true">
+                              <polyline points={sparkline(player)} />
+                            </svg>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            )}
+          </section>
+        ))}
+      </section>
+
+    </>
+  )}
+</Bulletin>
+
+<script is:inline>
+  (() => {
+    const buttons = Array.from(document.querySelectorAll('[data-position-button]'));
+    const panels = Array.from(document.querySelectorAll('[data-position-panel]'));
+    if (!buttons.length || !panels.length) return;
+
+    const positions = new Set(buttons.map((button) => button.dataset.positionButton));
+
+    function selectPosition(position, updateHash = true) {
+      if (!positions.has(position)) position = 'QB';
+
+      for (const button of buttons) {
+        button.setAttribute('aria-pressed', String(button.dataset.positionButton === position));
+      }
+      for (const panel of panels) {
+        panel.hidden = panel.dataset.positionPanel !== position;
+      }
+
+      if (updateHash) {
+        history.replaceState(null, '', `#${position.toLowerCase()}`);
+      }
+    }
+
+    for (const button of buttons) {
+      button.addEventListener('click', () => selectPosition(button.dataset.positionButton));
+    }
+
+    window.addEventListener('hashchange', () => {
+      selectPosition(location.hash.slice(1).toUpperCase(), false);
+    });
+
+    selectPosition(location.hash.slice(1).toUpperCase() || 'QB', false);
+
+    const teamButtons = Array.from(document.querySelectorAll('[data-team-position-button]'));
+    const teamPanels = Array.from(document.querySelectorAll('[data-team-position-panel]'));
+
+    function selectTeamPosition(position) {
+      if (!teamButtons.some((button) => button.dataset.teamPositionButton === position)) {
+        position = 'TOTAL';
+      }
+      for (const button of teamButtons) {
+        button.setAttribute('aria-pressed', String(button.dataset.teamPositionButton === position));
+      }
+      for (const panel of teamPanels) {
+        panel.hidden = panel.dataset.teamPositionPanel !== position;
+      }
+    }
+
+    for (const button of teamButtons) {
+      button.addEventListener('click', () => selectTeamPosition(button.dataset.teamPositionButton));
+    }
+
+    selectTeamPosition('TOTAL');
+
+    const markButtons = Array.from(document.querySelectorAll('[data-mark-group-button]'));
+    const markPanels = Array.from(document.querySelectorAll('[data-mark-group-panel]'));
+
+    function selectMarkGroup(group) {
+      if (!markButtons.some((button) => button.dataset.markGroupButton === group)) {
+        group = 'Player';
+      }
+      for (const button of markButtons) {
+        button.setAttribute('aria-pressed', String(button.dataset.markGroupButton === group));
+      }
+      for (const panel of markPanels) {
+        panel.hidden = panel.dataset.markGroupPanel !== group;
+      }
+    }
+
+    for (const button of markButtons) {
+      button.addEventListener('click', () => selectMarkGroup(button.dataset.markGroupButton));
+    }
+
+    selectMarkGroup('Player');
+  })();
+</script>
+
+<style>
+  .unavailable { padding-block: 3rem; }
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(14rem, 0.7fr);
+    gap: clamp(2rem, 6vw, 5rem);
+    padding-top: clamp(2rem, 7vw, 5rem);
+    padding-bottom: clamp(2rem, 6vw, 4.5rem);
+    border-bottom: 3px double var(--rule-strong);
+  }
+  .signal { color: var(--stamp); }
+  .hero h1 { margin: 0.55rem 0 1.2rem; font-size: clamp(2.45rem, 8vw, 5.8rem); line-height: 0.94; }
+  .hero h1 span { color: var(--violet); }
+  .dek { color: var(--ink-quiet); font-size: clamp(1rem, 2vw, 1.2rem); }
+  .hero__leader { align-self: end; padding: 1.2rem 0 0.8rem; border-block: 2px solid var(--rule-strong); }
+  .hero__number { display: block; color: var(--stamp); font-size: clamp(3rem, 9vw, 6rem); line-height: 1; letter-spacing: -0.08em; }
+  .hero__name { margin: 0.7rem 0 0; font-size: 1.15rem; font-weight: 700; }
+  .band { padding-top: clamp(2.8rem, 7vw, 5.2rem); }
+  .section-head { display: grid; grid-template-columns: minmax(15rem, 0.9fr) minmax(18rem, 1.1fr); align-items: end; gap: 2rem; border-bottom: 2px solid var(--rule-strong); padding-bottom: 0.8rem; margin-bottom: 1.8rem; }
+  .section-head p { margin: 0; color: var(--ink-quiet); }
+  .section-head .slug { margin-bottom: 0.3rem; }
+  .position-switcher { display: flex; gap: 0.65rem; flex-wrap: wrap; margin-bottom: 1.7rem; }
+  .position-switcher button { min-width: 4rem; padding: 0.5rem 0.8rem; border: 1px solid var(--rule-strong); background: transparent; color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
+  .position-switcher button:hover { color: var(--violet); border-color: var(--violet); }
+  .position-switcher button[aria-pressed='true'] { background: var(--violet); color: var(--ground); border-color: var(--violet); }
+  .race-panel__head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 0.7rem; }
+  .race-panel__head h3 { color: var(--violet); text-transform: uppercase; }
+  .race-panel__head p { margin: 0; }
+  [data-position-panel][hidden] { display: none; }
+  [data-team-position-panel][hidden] { display: none; }
+  [data-mark-group-panel][hidden] { display: none; }
+  .pressure-scale { display: flex; justify-content: space-between; margin-left: clamp(7rem, 18vw, 13rem); padding: 0 0 0.45rem; border-bottom: 1px solid var(--rule); }
+  .pressure-chart { border-bottom: 2px solid var(--rule-strong); }
+  .pressure-week { display: grid; grid-template-columns: clamp(6rem, 15vw, 10rem) minmax(18rem, 1fr) minmax(16rem, 0.8fr); gap: clamp(1rem, 3vw, 2.5rem); align-items: center; min-height: 8.7rem; padding: 1rem 0; border-top: 1px solid var(--rule); }
+  .pressure-week__label { display: grid; grid-template-columns: 1fr auto; align-items: baseline; }
+  .pressure-week__label .slug { grid-column: 1 / -1; margin: 0; }
+  .pressure-week__label strong { color: var(--stamp); font-size: clamp(1.8rem, 4vw, 2.8rem); line-height: 1; }
+  .pressure-week__delta { color: var(--violet); font-size: 0.75rem; font-weight: 700; }
+  .pressure-week__delta.down { color: var(--stamp); }
+  .pressure-week__range { position: relative; height: 4.5rem; }
+  .pressure-week__range::before { content: ''; position: absolute; inset: 2rem 0 auto; border-top: 1px dotted var(--rule-strong); }
+  .pressure-week__line { position: absolute; top: 1.75rem; height: 0.55rem; background: repeating-linear-gradient(135deg, var(--violet), var(--violet) 3px, transparent 3px, transparent 6px); border-inline: 2px solid var(--violet); }
+  .pressure-week__average { position: absolute; top: 1.35rem; width: 0.8rem; height: 1.35rem; margin-left: -0.4rem; background: var(--stamp); border: 2px solid var(--ground); transform: rotate(45deg); z-index: 1; }
+  .pressure-week__low, .pressure-week__high { position: absolute; top: 2.6rem; display: grid; min-width: 3.5rem; font-size: 0.75rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pressure-week__low { transform: translateX(-0.2rem); text-align: left; }
+  .pressure-week__high { transform: translateX(calc(-100% + 0.2rem)); text-align: right; }
+  .pressure-week__low small, .pressure-week__high small { color: var(--ink-faint); font-size: 0.58rem; letter-spacing: 0.1em; text-transform: uppercase; }
+  .pressure-week__notes { display: grid; grid-template-columns: 1fr 0.55fr; gap: 0.35rem 1rem; }
+  .pressure-week__notes p { display: grid; margin: 0; font-size: 0.82rem; }
+  .pressure-week__notes p:last-child { grid-column: 1 / -1; }
+  .race { list-style: none; padding: 0; margin: 0; }
+  .race li { display: grid; grid-template-columns: 2.2rem minmax(11rem, 1.1fr) minmax(8rem, 1fr) 6rem 4.6rem; gap: 0.8rem; align-items: center; padding: 0.72rem 0; border-bottom: 1px solid var(--rule); }
+  .race__rank { color: var(--ink-faint); }
+  .race__identity { display: grid; }
+  .race__track { height: 0.5rem; background: var(--ground-sunk); }
+  .race__track span { display: block; height: 100%; background: var(--violet); }
+  .race__points { color: var(--stamp); text-align: right; font-variant-numeric: tabular-nums; }
+  .spark { width: 6rem; height: 1.8rem; overflow: visible; }
+  .spark polyline { fill: none; stroke: var(--stamp); stroke-width: 3; vector-effect: non-scaling-stroke; }
+  .overall-board { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--rule); border-left: 1px solid var(--rule); }
+  .overall-board li { display: grid; grid-template-columns: 2rem 1fr auto; gap: 0.7rem; align-items: center; padding: 0.9rem; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+  .overall-board__rank { color: var(--stamp); font-size: 1.5rem; font-weight: 700; }
+  .overall-board span { display: grid; }
+  .overall-board small { color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.1em; }
+  .team-race { list-style: none; padding: 0; margin: 0; }
+  .team-race li { display: grid; grid-template-columns: 2rem minmax(13rem, 1.15fr) minmax(14rem, 1fr) minmax(7rem, 0.8fr) 5rem; gap: 0.9rem; align-items: center; padding: 0.8rem 0; border-bottom: 1px solid var(--rule); }
+  .team-race__rank { color: var(--stamp); font-size: 1.35rem; font-weight: 700; }
+  .team-race__identity { display: grid; }
+  .team-race__identity a { text-decoration: none; }
+  .team-race__weeks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.35rem; font-variant-numeric: tabular-nums; }
+  .team-race__weeks span { display: grid; text-align: right; }
+  .team-race__weeks small { color: var(--ink-faint); font-size: 0.62rem; letter-spacing: 0.1em; }
+  .mark-switcher { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 1.4rem; border-block: 1px solid var(--rule-strong); }
+  .mark-switcher button { display: grid; gap: 0.2rem; padding: 0.9rem 1rem; border: 0; border-right: 1px solid var(--rule); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+  .mark-switcher button:last-child { border-right: 0; }
+  .mark-switcher button span { font: 700 1.05rem/1 var(--font-display); text-transform: uppercase; }
+  .mark-switcher button small { color: var(--ink-faint); font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase; }
+  .mark-switcher button:hover span { color: var(--violet); }
+  .mark-switcher button[aria-pressed='true'] { background: var(--violet); color: var(--ground); }
+  .mark-switcher button[aria-pressed='true'] small { color: inherit; }
+  .mark-file { border: 1px solid var(--rule-strong); }
+  .mark-file__head { display: flex; align-items: center; justify-content: space-between; padding: 0.65rem 1rem; border-bottom: 1px solid var(--rule-strong); }
+  .mark-file__head p { margin: 0; }
+  .mark-file__head strong { color: var(--ink-faint); font-size: 1.8rem; line-height: 1; }
+  .marks { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .marks article { position: relative; min-height: 18rem; padding: 1.25rem; border-right: 1px solid var(--rule); overflow: hidden; }
+  .marks article:last-child { border-right: 0; }
+  .marks h3 { max-width: 18rem; margin-top: 1.8rem; font-size: clamp(1.25rem, 2.5vw, 2rem); }
+  .mark__index { position: absolute; top: 0.7rem; right: 0.9rem; margin: 0; color: var(--rule-strong); font-size: 3.5rem; font-weight: 700; line-height: 1; }
+  .mark__number { color: var(--stamp); font-size: clamp(2.2rem, 6vw, 4rem); font-weight: 700; line-height: 1; margin: 0.8rem 0; }
+  .mark__detail { max-width: 24rem; margin: 0; color: var(--ink-quiet); font-size: 0.85rem; }
+  .mark__position { position: absolute; right: 1rem; bottom: 0.8rem; color: var(--violet); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.14em; }
+  .mark-file--team .mark__number { color: var(--violet); }
+  .mark-file--lineup .marks article { border-top: 0.35rem solid var(--stamp); }
+  .mark-file--luck .marks article { border-top: 0.35rem solid var(--violet); }
+  .position { scroll-margin-top: 1rem; padding-top: 2rem; margin-top: 1rem; border-top: 3px double var(--rule-strong); }
+  .position__head { display: grid; grid-template-columns: 1fr auto auto; gap: 2rem; align-items: end; margin-bottom: 1rem; }
+  .position__head h3 { font-size: clamp(2rem, 5vw, 3.6rem); color: var(--violet); }
+  .position__head p { display: grid; margin: 0; }
+  .player-table { min-width: 62rem; }
+  .player-table th[scope='row'] { min-width: 15rem; }
+  .player-table .total { color: var(--stamp); font-weight: 700; }
+  .player-table .rank { color: var(--violet); font-weight: 700; }
+  .player-table small { color: var(--ink-faint); }
+  .player-table--continuation { margin-top: 0.7rem; }
+  details summary { cursor: pointer; color: var(--violet); font-size: 0.76rem; letter-spacing: 0.14em; text-transform: uppercase; padding: 0.8rem 0; }
+  @media (max-width: 760px) {
+    .hero, .section-head { grid-template-columns: 1fr; }
+    .hero__leader { max-width: 22rem; }
+    .pressure-scale { margin-left: 0; }
+    .pressure-week { grid-template-columns: 1fr; gap: 0.55rem; padding: 1.4rem 0; }
+    .pressure-week__label { grid-template-columns: auto auto 1fr; gap: 0.75rem; justify-content: start; }
+    .pressure-week__label .slug { grid-column: auto; align-self: center; }
+    .pressure-week__notes { grid-template-columns: 1fr 1fr; }
+    .race li { grid-template-columns: 2rem 1fr auto; }
+    .race__track { grid-column: 2 / 3; }
+    .race .spark { display: none; }
+    .race-panel__head { display: block; }
+    .overall-board { grid-template-columns: 1fr; }
+    .team-race li { grid-template-columns: 2rem 1fr auto; }
+    .team-race__weeks { grid-column: 2 / -1; width: 100%; }
+    .team-race .race__track { grid-column: 2 / 3; }
+    .mark-switcher { grid-template-columns: repeat(2, 1fr); }
+    .mark-switcher button:nth-child(2) { border-right: 0; }
+    .mark-switcher button:nth-child(-n + 2) { border-bottom: 1px solid var(--rule); }
+    .marks { grid-template-columns: 1fr; }
+    .marks article { min-height: 14rem; border-right: 0; border-bottom: 1px solid var(--rule); }
+    .marks article:last-child { border-bottom: 0; }
+    .position__head { grid-template-columns: 1fr 1fr; }
+    .position__head > div { grid-column: 1 / -1; }
+  }
+</style>

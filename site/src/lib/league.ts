@@ -131,12 +131,100 @@ export type Edition = {
     picks: { season: string; round: number; original_roster: number; from: number; to: number }[];
     faab: { from: number; to: number; amount: number }[];
   }[];
+  editorial_cues?: {
+    generator: string;
+    issue_line?: string;
+    edition_kicker?: string;
+    colophon_note: string;
+  };
+};
+
+export type QuarterPlayer = {
+  rank: number;
+  player_id: string;
+  player_name: string;
+  position: string;
+  team: string | null;
+  games: number;
+  total_points: number;
+  points_per_game: number;
+  weekly_points: number[];
+  best_week: number;
+  best_week_points: number;
+  consistency: number;
+  trend: number;
+};
+
+export type QuarterMark = {
+  label: string;
+  subject: string;
+  display_value: string;
+  detail: string;
+  position: string | null;
+};
+
+export type QuarterMarkGroup = {
+  group: 'Player' | 'Team' | 'Lineup' | 'Luck';
+  marks: QuarterMark[];
+};
+
+export type FirstQuarterReport = {
+  season: number;
+  start_week: number;
+  end_week: number;
+  through_week: number;
+  status: 'in-progress' | 'complete';
+  positions: string[];
+  scoring_rules: { key: string; points_per_unit: number }[];
+  weekly_totals: {
+    week: number;
+    total_points: number;
+    player_count: number;
+    leaders: { position: string; player_name: string; team: string | null; points: number }[];
+  }[];
+  overall_leaders: QuarterPlayer[];
+  position_reports: {
+    position: string;
+    player_count: number;
+    leader: QuarterPlayer;
+    top_ten_average: number;
+    rankings: QuarterPlayer[];
+  }[];
+  team_position_reports: {
+    position: string;
+    leader: QuarterTeam | null;
+    rankings: QuarterTeam[];
+  }[];
+  mark_groups: QuarterMarkGroup[];
+  superlatives: {
+    biggest_week: {
+      player_name: string;
+      position: string;
+      team: string | null;
+      week: number;
+      points: number;
+    } | null;
+    steadiest: QuarterPlayer | null;
+    hottest_finish: QuarterPlayer | null;
+  };
+};
+
+export type QuarterTeam = {
+  rank: number;
+  roster_id: number;
+  owner_name: string;
+  team_name: string;
+  position: string;
+  total_points: number;
+  points_per_week: number;
+  weekly_points: number[];
 };
 
 export const data = league as unknown as {
   generated_at_utc: string;
   league_name: string;
   current_edition?: Edition;
+  first_quarter?: FirstQuarterReport;
   seasons: Season[];
   franchises: Franchise[];
   owners: Owner[];
@@ -176,6 +264,7 @@ export const data = league as unknown as {
 export const PLAYED_SEASONS = data.seasons.map((s) => s.season).sort((a, b) => b - a);
 
 export const CURRENT_EDITION = data.current_edition ?? null;
+export const FIRST_QUARTER = data.first_quarter ?? null;
 
 export const ALL_SEASONS = Array.from(
   new Set([

@@ -74,7 +74,7 @@ try
         ReportCommand.RostersHistory => RunRostersHistory((RostersHistoryCommandOptions)invocation.Options),
         ReportCommand.Export => RunExport((ExportCommandOptions)invocation.Options),
         ReportCommand.AssetHistory => RunAssetHistory((AssetHistoryCommandOptions)invocation.Options),
-        ReportCommand.SiteData => SiteDataBuilder.RunAsync(client),
+        ReportCommand.SiteData => SiteDataBuilder.RunAsync(client, nflData),
         _ => throw new InvalidOperationException($"Unsupported report command {invocation.Command}.")
     });
 }

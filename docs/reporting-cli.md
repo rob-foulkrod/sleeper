@@ -327,6 +327,17 @@ This is the privacy boundary. Sleeper usernames are internal keys and are stripp
 owners reach the site as first names only. Standings, scores, records, and the article index
 are all rendered from this file — never from parsed prose.
 
+When a current weekly edition exists, `site-data` also builds `first_quarter` from nflverse
+regular-season player stat lines for Weeks 1–4. It scores every QB, RB, WR, TE, and K with
+the current edition's captured league scoring settings and merges Sleeper's league-scored
+team-defense totals from the four weekly snapshots. It then publishes total and weekly points,
+positional ranks, consistency, peak, and trend measures. The same snapshots produce fantasy-team
+rankings from official weekly totals and aggregate starting-lineup points at QB, RB, WR, TE, K,
+and DEF. It also calculates 12 quarter marks across player dominance, position-room strength,
+optimal-lineup efficiency, bench scoring, actual wins, all-play expected wins, and matchup margins.
+The report updates on every `site-data` run and powers `/first-quarter`; player ranks do not use
+nflverse's default fantasy-point columns.
+
 It also fails loudly rather than degrading: an award whose owner cannot be resolved, or a
 franchise with no current owner in the export, throws with the season and the award named.
 

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Sleeper.Api;
+using Sleeper.Api.NflData;
 
 namespace Sleeper.RosterReport.Recap;
 
@@ -16,7 +17,7 @@ namespace Sleeper.RosterReport.Recap;
 /// </remarks>
 internal static class SiteDataBuilder
 {
-    public static async Task<int> RunAsync(ISleeperClient client)
+    public static async Task<int> RunAsync(ISleeperClient client, INflDataClient nflData)
     {
         var root = RecapPaths.WorkspaceRoot;
         var recapsRoot = Path.Combine(root, "recaps");
@@ -77,12 +78,16 @@ internal static class SiteDataBuilder
         var franchises = BuildFranchises(seasons, currentOwners);
         var owners = BuildOwners(seasons, currentOwners);
         var headToHead = BuildHeadToHead(seasons);
+        var firstQuarter = currentEdition is { } current
+            ? await BuildFirstQuarterAsync(nflData, root, current)
+            : null;
 
         var doc = new
         {
             generated_at_utc = DateTime.UtcNow.ToString("o"),
             league_name = leagueName,
             current_edition = currentEdition,
+            first_quarter = firstQuarter,
             seasons = seasons.Select(BuildSeason).ToList(),
             franchises,
             owners,
@@ -132,6 +137,219 @@ internal static class SiteDataBuilder
         Console.WriteLine($"  {seasons.Count} season(s), {franchises.Count} franchises, {owners.Count} owners.");
         return 0;
     }
+
+    private static async Task<FirstQuarterReport?> BuildFirstQuarterAsync(
+        INflDataClient nflData,
+        string root,
+        JsonElement edition)
+    {
+        if (!edition.TryGetProperty("season", out var seasonNode)
+            || !edition.TryGetProperty("completed_week", out var completedWeekNode)
+            || !edition.TryGetProperty("scoring_settings", out var scoringNode))
+        {
+            return null;
+        }
+
+        var season = seasonNode.ValueKind == JsonValueKind.String
+            ? int.Parse(seasonNode.GetString()!)
+            : seasonNode.GetInt32();
+        var scoringSettings = scoringNode.Deserialize<Dictionary<string, decimal>>()
+            ?? throw new InvalidOperationException(
+                $"The {season} weekly edition has no usable league scoring settings.");
+
+        Console.WriteLine($"  {season}: calculating First Quarter player scoring through Week {Math.Min(completedWeekNode.GetInt32(), 4)}...");
+        var throughWeek = Math.Min(completedWeekNode.GetInt32(), 4);
+        var rosterPositions = edition.TryGetProperty("roster_positions", out var rosterPositionsNode)
+            ? rosterPositionsNode.EnumerateArray().Select(position => position.GetString()!).ToList()
+            : throw new InvalidOperationException(
+                $"The {season} weekly edition has no roster positions for lineup analysis.");
+        var (defenseScores, teamScores, lineupScores) =
+            LoadFirstQuarterScores(root, season, throughWeek, rosterPositions);
+        return await FirstQuarterReportBuilder.BuildAsync(
+            nflData,
+            season,
+            completedWeekNode.GetInt32(),
+            scoringSettings,
+            defenseScores,
+            teamScores,
+            lineupScores);
+    }
+
+    private static (
+        List<QuarterDefenseWeekScore> DefenseScores,
+        List<QuarterTeamWeekScore> TeamScores,
+        List<QuarterLineupWeekScore> LineupScores) LoadFirstQuarterScores(
+        string root,
+        int season,
+        int throughWeek,
+        IReadOnlyList<string> rosterPositions)
+    {
+        var defenseScores = new List<QuarterDefenseWeekScore>();
+        var teamScores = new List<QuarterTeamWeekScore>();
+        var lineupScores = new List<QuarterLineupWeekScore>();
+        for (var week = 1; week <= throughWeek; week++)
+        {
+            var path = Path.Combine(root, "datafiles", season.ToString(), $"week-{week:00}.json");
+            if (!File.Exists(path))
+                throw new InvalidOperationException(
+                    $"The {season} Week {week} snapshot is required to rank team defenses.");
+
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var teams = document.RootElement.GetProperty("teams").EnumerateArray().ToList();
+            var defenses = teams
+                .SelectMany(team => team.GetProperty("roster").EnumerateArray())
+                .Where(player => player.GetProperty("label").GetString()?.Contains("(DEF,", StringComparison.Ordinal) == true)
+                .GroupBy(player => player.GetProperty("player_id").GetString()!, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var defense in defenses)
+            {
+                var entry = defense.Single();
+                var label = entry.GetProperty("label").GetString()!;
+                var nameEnd = label.LastIndexOf(" (DEF,", StringComparison.Ordinal);
+                defenseScores.Add(new QuarterDefenseWeekScore(
+                    Team: defense.Key,
+                    Name: nameEnd > 0 ? label[..nameEnd] : label,
+                    Week: week,
+                    Points: entry.GetProperty("points").GetDecimal()));
+            }
+
+            foreach (var team in teams)
+            {
+                var rosterId = team.GetProperty("roster_id").GetInt32();
+                var ownerName = team.GetProperty("owner_name").GetString()!;
+                var teamName = team.GetProperty("team_name").GetString()!;
+                var matchupId = team.TryGetProperty("matchup_id", out var matchupNode)
+                    && matchupNode.ValueKind != JsonValueKind.Null
+                    ? matchupNode.GetInt32()
+                    : (int?)null;
+                var rosterPlayers = team
+                    .GetProperty("roster")
+                    .EnumerateArray()
+                    .Select(player => new QuarterRosterPlayer(
+                        player.GetProperty("label").GetString()!,
+                        ParsePlayerPosition(player.GetProperty("label").GetString()!),
+                        player.GetProperty("points").GetDecimal(),
+                        player.GetProperty("started").GetBoolean()))
+                    .ToList();
+                var bestBench = rosterPlayers
+                    .Where(player => !player.Started)
+                    .OrderByDescending(player => player.Points)
+                    .FirstOrDefault();
+                lineupScores.Add(new QuarterLineupWeekScore(
+                    rosterId,
+                    ownerName,
+                    teamName,
+                    week,
+                    team.GetProperty("points").GetDecimal(),
+                    CalculateOptimalLineup(rosterPlayers, rosterPositions),
+                    bestBench?.Label ?? "No bench player",
+                    bestBench?.Position,
+                    bestBench?.Points ?? 0m));
+                teamScores.Add(new QuarterTeamWeekScore(
+                    rosterId,
+                    ownerName,
+                    teamName,
+                    "TOTAL",
+                    week,
+                    team.GetProperty("points").GetDecimal(),
+                    matchupId));
+
+                var positionTotals = team
+                    .GetProperty("roster")
+                    .EnumerateArray()
+                    .Where(player => player.GetProperty("started").GetBoolean())
+                    .Select(player => new
+                    {
+                        Position = ParsePlayerPosition(player.GetProperty("label").GetString()!),
+                        Points = player.GetProperty("points").GetDecimal()
+                    })
+                    .Where(player => PositionOrderForTeamTotals.Contains(player.Position))
+                    .GroupBy(player => player.Position, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var position in positionTotals)
+                {
+                    teamScores.Add(new QuarterTeamWeekScore(
+                        rosterId,
+                        ownerName,
+                        teamName,
+                        position.Key,
+                        week,
+                        position.Sum(player => player.Points),
+                        matchupId));
+                }
+            }
+        }
+
+        return (defenseScores, teamScores, lineupScores);
+    }
+
+    private static readonly HashSet<string> PositionOrderForTeamTotals =
+        new(["QB", "RB", "WR", "TE", "K", "DEF"], StringComparer.OrdinalIgnoreCase);
+
+    private static string ParsePlayerPosition(string label)
+    {
+        var positionStart = label.LastIndexOf('(');
+        if (positionStart < 0)
+            return "";
+
+        var positionEnd = label.IndexOf(',', positionStart);
+        if (positionEnd < 0)
+            positionEnd = label.IndexOf(')', positionStart);
+
+        return positionEnd > positionStart
+            ? label[(positionStart + 1)..positionEnd].ToUpperInvariant()
+            : "";
+    }
+
+    private static decimal CalculateOptimalLineup(
+        IReadOnlyList<QuarterRosterPlayer> players,
+        IReadOnlyList<string> rosterPositions)
+    {
+        var remaining = players.ToList();
+        var total = 0m;
+        var directSlots = rosterPositions
+            .Where(PositionOrderForTeamTotals.Contains)
+            .GroupBy(position => position, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var slots in directSlots)
+        {
+            var selected = remaining
+                .Where(player => string.Equals(player.Position, slots.Key, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(player => player.Points)
+                .Take(slots.Count())
+                .ToList();
+            total += selected.Sum(player => player.Points);
+            foreach (var player in selected)
+                remaining.Remove(player);
+        }
+
+        foreach (var flexSlot in rosterPositions.Where(position => position.Contains("FLEX", StringComparison.OrdinalIgnoreCase)))
+        {
+            var eligible = flexSlot.ToUpperInvariant() switch
+            {
+                "WRRB_FLEX" => new HashSet<string>(["WR", "RB"], StringComparer.OrdinalIgnoreCase),
+                "REC_FLEX" => new HashSet<string>(["WR", "TE"], StringComparer.OrdinalIgnoreCase),
+                "SUPER_FLEX" => new HashSet<string>(["QB", "RB", "WR", "TE"], StringComparer.OrdinalIgnoreCase),
+                _ => new HashSet<string>(["RB", "WR", "TE"], StringComparer.OrdinalIgnoreCase)
+            };
+            var selected = remaining
+                .Where(player => eligible.Contains(player.Position))
+                .OrderByDescending(player => player.Points)
+                .FirstOrDefault();
+            if (selected is null) continue;
+
+            total += selected.Points;
+            remaining.Remove(selected);
+        }
+
+        return Math.Round(total, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private sealed record QuarterRosterPlayer(
+        string Label,
+        string Position,
+        decimal Points,
+        bool Started);
 
     /// <summary>
     /// The aggregates record points for and against but not who the opponent was, and
