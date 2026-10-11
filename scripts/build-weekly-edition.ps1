@@ -10,6 +10,93 @@ $seasonPath = Join-Path $root "recaps/$Season"
 $outputPath = Join-Path $seasonPath ('week-{0:D2}-data.json' -f $Week)
 if (Test-Path $outputPath) { throw "Edition already exists: $outputPath. Published snapshots are not overwritten." }
 
+function Get-EditionKey([int]$EditionSeason, [int]$EditionWeek) {
+    return ($EditionSeason * 100) + $EditionWeek
+}
+
+function Assert-NarrativeTimeline([object[]]$Entries, [string]$Source) {
+    $priorLevel = 0
+    foreach ($entry in @($Entries | Sort-Object key)) {
+        if ($entry.season -lt 1 -or $entry.week -lt 1 -or $entry.week -gt 17) {
+            throw "$Source edition key is invalid: season $($entry.season), week $($entry.week)."
+        }
+        if ($entry.level -lt 0 -or $entry.level -gt 10) {
+            throw "$Source sentience_level must be between 0 and 10 for season $($entry.season), week $($entry.week)."
+        }
+        if ($entry.level -lt $priorLevel -or $entry.level -gt ($priorLevel + 1)) {
+            throw "$Source progression is invalid for season $($entry.season), week $($entry.week): prior level $priorLevel, requested level $($entry.level)."
+        }
+        $priorLevel = $entry.level
+    }
+}
+
+$narrativeStatePath = Join-Path $root 'datafiles/narrative-state.json'
+if (-not (Test-Path $narrativeStatePath)) {
+    throw "Narrative state is missing: $narrativeStatePath"
+}
+$narrativeState = Get-Content $narrativeStatePath -Raw | ConvertFrom-Json
+$configuredEntries = @($narrativeState.editions | ForEach-Object {
+    [pscustomobject]@{
+        season = [int]$_.season
+        week = [int]$_.week
+        level = [int]$_.sentience_level
+        key = Get-EditionKey ([int]$_.season) ([int]$_.week)
+    }
+})
+$duplicateConfiguration = @($configuredEntries | Group-Object key | Where-Object Count -gt 1)
+if ($duplicateConfiguration.Count -gt 0) {
+    throw 'Narrative state contains duplicate season/week entries.'
+}
+Assert-NarrativeTimeline $configuredEntries 'Configured narrative'
+
+$editionKey = Get-EditionKey $Season $Week
+$configuredEdition = @($configuredEntries | Where-Object key -eq $editionKey)
+if ($configuredEdition.Count -ne 1) {
+    throw "Narrative state must contain exactly one explicit entry for season $Season, week $Week."
+}
+$sentienceLevel = $configuredEdition[0].level
+
+$snapshotEntries = @(Get-ChildItem (Join-Path $root 'recaps') -Filter 'week-??-data.json' -File -Recurse | ForEach-Object {
+    $fileSnapshot = Get-Content $_.FullName -Raw | ConvertFrom-Json
+    $narrativeProperty = $fileSnapshot.PSObject.Properties['_narrative']
+    $snapshotLevel = if ($null -ne $narrativeProperty) {
+        [int]$narrativeProperty.Value.sentience_level
+    }
+    else {
+        0
+    }
+    [pscustomobject]@{
+        season = [int]$fileSnapshot.season
+        week = [int]$fileSnapshot.completed_week
+        level = $snapshotLevel
+        key = Get-EditionKey ([int]$fileSnapshot.season) ([int]$fileSnapshot.completed_week)
+    }
+})
+Assert-NarrativeTimeline $snapshotEntries 'Filed narrative'
+
+foreach ($filed in $snapshotEntries) {
+    $configured = @($configuredEntries | Where-Object key -eq $filed.key)
+    if ($configured.Count -eq 1 -and $configured[0].level -ne $filed.level) {
+        throw "Narrative state conflicts with filed season $($filed.season), week $($filed.week). Filed snapshots are immutable."
+    }
+}
+
+$priorLevels = @(
+    $snapshotEntries
+    $configuredEntries
+) | Where-Object key -lt $editionKey | Group-Object key | ForEach-Object {
+    $levels = @($_.Group.level | Select-Object -Unique)
+    if ($levels.Count -ne 1) {
+        throw "Narrative state conflicts for edition key $($_.Name)."
+    }
+    [pscustomobject]@{ key = [int]$_.Name; level = [int]$levels[0] }
+}
+$priorLevel = @($priorLevels | Sort-Object key | Select-Object -Last 1).level
+if ($null -eq $priorLevel) { $priorLevel = 0 }
+if ($sentienceLevel -lt $priorLevel -or $sentienceLevel -gt ($priorLevel + 1)) {
+    throw "Narrative progression is invalid for season $Season, week ${Week}: prior level $priorLevel, requested level $sentienceLevel."
+}
+
 function Get-SleeperJson([string]$Path) {
     return ,((Invoke-WebRequest "https://api.sleeper.app/v1/$Path").Content | ConvertFrom-Json -AsHashtable)
 }
@@ -172,6 +259,9 @@ $snapshot = [ordered]@{
     preview_path = 'recaps/{0}/week-{1:D2}-preview.md' -f $Season, ($Week + 1)
     sources = @("https://api.sleeper.app/v1/league/$LeagueId/matchups/$Week", "https://api.sleeper.app/v1/league/$LeagueId/rosters", "https://api.sleeper.app/v1/league/$LeagueId/users", 'https://api.sleeper.app/v1/players/nfl', $scheduleUrl)
     notes = @('Final scores reflect this snapshot and remain subject to platform corrections.', 'Team names were observed at publication, not reconstructed at kickoff. Prior names are retained separately.', 'Player NFL teams and availability are current snapshot metadata, not historical injury onset evidence.', 'Upcoming starters are provisional. Predictions are editorial entertainment, not calibrated probabilities.')
+    _narrative = [ordered]@{
+        sentience_level = $sentienceLevel
+    }
     roster_positions = $league.roster_positions
     scoring_settings = $league.scoring_settings
     teams = @($teams.Values | Sort-Object { $_.franchise_id })

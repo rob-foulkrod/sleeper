@@ -496,3 +496,6 @@ recap-runs/
 site/dist/
 site/.astro/
 site/shots/
+
+# Sentience-gradient sample renders (local only)
+/test/

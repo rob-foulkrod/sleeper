@@ -1,0 +1,10 @@
+{
+  "_comment": "Internal editorial progression. Add one explicit entry before filing a new weekly edition. Filed snapshots are authoritative and the public site never emits sentience_level.",
+  "editions": [
+    {
+      "season": 2026,
+      "week": 4,
+      "sentience_level": 0
+    }
+  ]
+}

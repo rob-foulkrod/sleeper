@@ -214,8 +214,14 @@ internal sealed class RecapEnvelopeBuilder
         // 9. Agent fetch hints (the things the analyst should web-search).
         var hints = BuildAgentFetchHints(season, week, injuryReport);
 
-        // 10. Prior recaps + team-name watch.
-        var (priorRecaps, nameChanges) = LoadPriorRecapsAndNameWatch(season, week, owners);
+        // 10. Prior recaps + team-name watch. Memory depth grows only through filed,
+        // fact-grounded recaps; level zero retains the existing two-week window.
+        var narrative = NarrativeStateStore.Resolve(season, week);
+        var (priorRecaps, nameChanges) = LoadPriorRecapsAndNameWatch(
+            season,
+            week,
+            owners,
+            narrative.Policy.MemoryWeeks);
 
         // 11. Build the meta + envelope.
         var meta = new RecapMeta(
@@ -261,7 +267,8 @@ internal sealed class RecapEnvelopeBuilder
             PreviouslyOnLeague: previously,
             BannedPhrases: bannedPhrases,
             SeasonOutcome: seasonOutcome,
-            InjuryReport: injuryReport);
+            InjuryReport: injuryReport,
+            Narrative: narrative);
 
         // 12. Snapshot team names for next week's run.
         if (options.PersistSnapshots)
@@ -1153,7 +1160,11 @@ internal sealed class RecapEnvelopeBuilder
 
     // ---------------- Prior recaps + name watch ----------------
 
-    private (List<PriorRecap>, List<TeamNameChange>) LoadPriorRecapsAndNameWatch(int season, int week, List<OwnerRef> owners)
+    private (List<PriorRecap>, List<TeamNameChange>) LoadPriorRecapsAndNameWatch(
+        int season,
+        int week,
+        List<OwnerRef> owners,
+        int memoryWeeks)
     {
         var dir = RecapPaths.RecapDir(season);
         var prior = new List<PriorRecap>();
@@ -1164,11 +1175,14 @@ internal sealed class RecapEnvelopeBuilder
             {
                 prior.Add(new PriorRecap(week - 1, "verbatim", File.ReadAllText(lastWeekPath)));
             }
-            var twoWeekPath = Path.Combine(dir, $"week-{week - 2:D2}.md");
-            if (week > 2 && File.Exists(twoWeekPath))
+            for (var offset = 2; offset <= memoryWeeks && week > offset; offset++)
             {
-                var summary = SummarizeMarkdown(File.ReadAllText(twoWeekPath), 5);
-                prior.Add(new PriorRecap(week - 2, "summary", summary));
+                var priorWeek = week - offset;
+                var priorPath = Path.Combine(dir, $"week-{priorWeek:D2}.md");
+                if (!File.Exists(priorPath))
+                    continue;
+                var summary = SummarizeMarkdown(File.ReadAllText(priorPath), 5);
+                prior.Add(new PriorRecap(priorWeek, "summary", summary));
             }
         }
 
@@ -2249,6 +2263,7 @@ internal static class RecapPaths
     public static string AssetMovementAudit(int season) => Path.Combine(DataDir(season), "asset-movement-audit.json");
     public static string AssetMovementSummary(int season) => Path.Combine(DataDir(season), "asset-movement-summary.txt");
     public static string WeeklyThemes => Path.Combine(WorkspaceRoot, "datafiles", "weekly-themes.json");
+    public static string NarrativeState => Path.Combine(WorkspaceRoot, "datafiles", "narrative-state.json");
 
     // Season-recap artifacts. All persisted alongside the weekly recaps so the
     // whole season's machine-readable state lives in one folder.

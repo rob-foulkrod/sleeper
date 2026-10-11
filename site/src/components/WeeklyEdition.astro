@@ -32,13 +32,14 @@ const upcoming = edition.upcoming.slice().sort((first, second) =>
 ---
 
 <div class="sheet edition">
-  <p class="slug edition__issue"><span class="struck">Week {edition.completed_week} final</span> {edition.season} / Week {edition.next_week} ahead</p>
+  <p class="slug edition__issue"><span class:list={{ struck: !!preview }}>Week {edition.completed_week} final</span> {edition.season}{preview && ` / Week ${edition.next_week} ahead`}</p>
+  {edition.editorial_cues?.edition_kicker && <p class="slug edition__memory">{edition.editorial_cues.edition_kicker}</p>}
   <div class="edition__lead">
     <section>
-      <p class="slug">The next argument</p>
-      <h1>{preview ? <a href={`${base}/${articleSlug(preview.path)}/`}>{shortTitle(preview.title)}</a> : `Week ${edition.next_week} ahead`}</h1>
+      <p class="slug">{preview ? 'The next argument' : 'The final word'}</p>
+      <h1>{preview ? <a href={`${base}/${articleSlug(preview.path)}/`}>{shortTitle(preview.title)}</a> : recap ? <a href={`${base}/${articleSlug(recap.path)}/`}>{shortTitle(recap.title)}</a> : `Week ${edition.completed_week} final`}</h1>
       <p class="dek">{scored[0].owner_name} set the pace at <strong>{pts(scored[0].points)}</strong>.
-        {' '}The scores are final. The next lineup is a different story.</p>
+        {' '}{preview ? 'The scores are final. The next lineup is a different story.' : `The Week ${edition.completed_week} results and their consequences are in the recap.`}</p>
       <nav class="edition__links" aria-label="This week's articles">
         {recap && <a href={`${base}/${articleSlug(recap.path)}/`}>Week {edition.completed_week} final recap</a>}
         {preview && <a href={`${base}/${articleSlug(preview.path)}/`}>Week {edition.next_week} preview</a>}
@@ -135,6 +136,7 @@ const upcoming = edition.upcoming.slice().sort((first, second) =>
 
 <style>
   .edition { padding-top: 1.4rem; }
+  .edition__memory { color: var(--ink-faint); margin-top: -0.35rem; }
   .band { padding-top: 2rem; padding-bottom: 2rem; border-top: 1px solid var(--rule); }
   .edition__issue { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
   .edition__lead, .edition__columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 2.5rem; }

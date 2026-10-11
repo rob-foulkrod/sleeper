@@ -179,13 +179,21 @@ if ($LASTEXITCODE -ne 0) { throw 'Asset history export failed.' }
 For a missing `recaps/{season}/week-NN-data.json`, run the existing script after
 parsing it and confirming the requested week is closed:
 
+Before running it, inspect `datafiles/narrative-state.json`. It must contain one
+explicit entry for the completed season/week. Existing and omitted historical
+editions are level `0`; do not backfill them. A new value may hold steady or
+increase by one only. Never change a filed snapshot to revise the level. If the
+entry is missing, duplicated, out of range, regresses, jumps, or conflicts with a
+filed snapshot, stop and report the validation error rather than bypassing it.
+
 ```powershell
 ./scripts/build-weekly-edition.ps1 -Season $season -Week $week -LeagueId $leagueId
 ```
 
 The script refuses an existing output; reuse that snapshot rather than bypassing
 the guard. Validate `completed_week`, `next_week`, roster count, pairings, scores,
-owner mappings, and full trade packages. This snapshot drives the homepage;
+owner mappings, full trade packages, and the internal `_narrative.sentience_level`.
+The raw level is operator state and must not appear in public site JSON. This snapshot drives the homepage;
 `datafiles/{season}/week-NN.json` alone does not advance the edition.
 
 Current roster ownership belongs in the upcoming preview; requested-week ownership

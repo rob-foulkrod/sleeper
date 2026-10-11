@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Sleeper.Api;
 using Sleeper.Api.NflData;
 
@@ -78,6 +79,9 @@ internal static class SiteDataBuilder
         var franchises = BuildFranchises(seasons, currentOwners);
         var owners = BuildOwners(seasons, currentOwners);
         var headToHead = BuildHeadToHead(seasons);
+        var publicEdition = currentEdition is { } loadedEdition
+            ? BuildPublicWeeklyEdition(loadedEdition)
+            : null;
         var firstQuarter = currentEdition is { } current
             ? await BuildFirstQuarterAsync(nflData, root, current)
             : null;
@@ -86,7 +90,7 @@ internal static class SiteDataBuilder
         {
             generated_at_utc = DateTime.UtcNow.ToString("o"),
             league_name = leagueName,
-            current_edition = currentEdition,
+            current_edition = publicEdition,
             first_quarter = firstQuarter,
             seasons = seasons.Select(BuildSeason).ToList(),
             franchises,
@@ -883,6 +887,35 @@ internal static class SiteDataBuilder
             throw new InvalidOperationException($"Invalid weekly edition: {path}");
 
         return edition.Clone();
+    }
+
+    internal static JsonObject BuildPublicWeeklyEdition(JsonElement edition)
+    {
+        var projected = JsonNode.Parse(edition.GetRawText())?.AsObject()
+            ?? throw new InvalidOperationException("Weekly edition could not be projected.");
+        var level = 0;
+        if (edition.TryGetProperty("_narrative", out var narrative)
+            && narrative.TryGetProperty("sentience_level", out var levelElement))
+        {
+            level = levelElement.GetInt32();
+        }
+
+        projected.Remove("_narrative");
+        projected.Remove("editorial_cues");
+
+        var cues = NarrativePolicy.ForLevel(level).PublicCues;
+        if (cues is not null)
+        {
+            projected["editorial_cues"] = JsonSerializer.SerializeToNode(
+                cues,
+                new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+                });
+        }
+
+        return projected;
     }
 
     private static string? ReadTitle(string path)

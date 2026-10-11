@@ -21,6 +21,22 @@ internal sealed class RecapAgent
     private readonly IReportTextAgent _gameAgent;
     private readonly IReportTextAgent _leagueAgent;
     private readonly IReportTextAgent? _proofreaderAgent;
+
+    private static NarrativePolicy NarrativePolicyFor(RecapEnvelope envelope)
+        => envelope.Narrative?.Policy ?? NarrativePolicy.ForLevel(0);
+
+    private static void AppendNarrativePolicy(
+        StringBuilder text,
+        RecapEnvelope envelope,
+        NarrativeSurface surface)
+    {
+        var policy = NarrativePolicyFor(envelope);
+        text.AppendLine("## Narrative continuity policy");
+        text.AppendLine(policy.InstructionFor(surface));
+        text.AppendLine("This policy changes framing only. Scores, standings, injuries, ownership, transactions, predictions, and archive facts remain authoritative and may never be altered to serve the atmosphere.");
+        text.AppendLine();
+    }
+
     private static void AppendInjuryEvidence(StringBuilder text, RecapEnvelope envelope)
     {
         if (envelope.InjuryReport is null)
@@ -195,6 +211,7 @@ internal sealed class RecapAgent
         sb.AppendLine("4. NAMES RULE: In prose, use ONLY real names or team names. NEVER write internal usernames such as database handles.");
         sb.AppendLine("</strict_rules>");
         sb.AppendLine();
+        AppendNarrativePolicy(sb, env, NarrativeSurface.Game);
         sb.AppendLine("<game_json>");
         sb.AppendLine("```json");
         sb.AppendLine(JsonSerializer.Serialize(g, JsonOpts));
@@ -287,7 +304,7 @@ internal sealed class RecapAgent
         var defectsConfirmed = false;
         try
         {
-            var checkPrompt = $"Compare this draft recap against the game data and COMPUTED MATCHUP FACTS in the prompt below. Check for: player misattributions, incorrect scores/margins, ungrounded claims, or roster errors.\n\n" +
+            var checkPrompt = $"Compare this draft recap against the game data, COMPUTED MATCHUP FACTS, and narrative continuity policy in the prompt below. Check for: player misattributions, incorrect scores/margins, ungrounded claims, roster errors, or any site/archive/generator self-reference forbidden on this surface.\n\n" +
                               $"## DRAFT RECAP TO PROOFREAD:\n{draft}\n\n" +
                               $"## ORIGINAL PROMPT AND GAME DATA:\n{originalPrompt}";
 
@@ -358,6 +375,7 @@ internal sealed class RecapAgent
             sb.AppendLine($"League schedule: regular season is weeks 1–{env.Schedule.RegularSeasonLastWeek}; playoffs are week {env.Schedule.PlayoffStartWeek} (semifinals) and week {env.Schedule.ChampionshipWeek} (championship). There is NO week {env.Schedule.TotalWeeks + 1}. Do not reference or invent any week beyond {env.Schedule.TotalWeeks}.");
         }
         sb.AppendLine();
+        AppendNarrativePolicy(sb, env, NarrativeSurface.League);
         sb.AppendLine("## Owner directory (use these real names or team names ONLY; do NOT use the internal usernames below)");
         var forbiddenUsernames = new List<string>();
         foreach (var o in env.Owners.OrderBy(o => o.RosterId))
@@ -541,7 +559,7 @@ internal sealed class RecapAgent
         var defectsConfirmed = false;
         try
         {
-            var checkPrompt = $"Compare this draft league commentary against COMPUTED LEAGUE FACTS and standings in the prompt below. Check for: player misattributions (crediting a player to the wrong owner), ungrounded streak claims, or invalid references.\n\n" +
+            var checkPrompt = $"Compare this draft league commentary against COMPUTED LEAGUE FACTS, standings, and the narrative continuity policy in the prompt below. Check for: player misattributions (crediting a player to the wrong owner), ungrounded streak claims, invalid references, personification below the allowed level, or references beyond the stated whole-recap budget.\n\n" +
                               $"## DRAFT LEAGUE COMMENTARY TO PROOFREAD:\n{draft}\n\n" +
                               $"## ORIGINAL PROMPT AND GROUND TRUTH DATA:\n{originalPrompt}";
 
@@ -613,6 +631,7 @@ internal sealed class RecapAgent
         sb.AppendLine($"League: **{env.Meta.LeagueName}** (Week {env.Meta.Week} recap -> Week {env.LookAhead.NextWeek} Forecast).");
         sb.AppendLine("</identity_card>");
         sb.AppendLine();
+        AppendNarrativePolicy(sb, env, NarrativeSurface.Forecast);
         if (env.Schedule is not null)
         {
             sb.AppendLine($"League schedule: regular season is weeks 1–{env.Schedule.RegularSeasonLastWeek}; playoffs are week {env.Schedule.PlayoffStartWeek} (semifinals) and week {env.Schedule.ChampionshipWeek} (championship). There is NO week beyond {env.Schedule.TotalWeeks}.");
@@ -711,7 +730,7 @@ internal sealed class RecapAgent
         var defectsConfirmed = false;
         try
         {
-            var checkPrompt = $"Compare this draft Forecast and Predictions against COMPUTED NEXT-WEEK FORECAST FACTS in the prompt below. Check for: altered pick names, changed projected score lines, inconsistent confidence levels, or impossible streak claims.\n\n" +
+            var checkPrompt = $"Compare this draft Forecast and Predictions against COMPUTED NEXT-WEEK FORECAST FACTS and the narrative continuity policy in the prompt below. Check for: altered pick names, changed projected score lines, inconsistent confidence levels, impossible streak claims, or any site/archive/generator self-reference forbidden on this surface.\n\n" +
                               $"## DRAFT FORECAST TO PROOFREAD:\n{draft}\n\n" +
                               $"## ORIGINAL PROMPT AND GROUND TRUTH DATA:\n{originalPrompt}";
 
@@ -775,9 +794,9 @@ internal sealed class RecapAgent
         string? matchup,
         CancellationToken ct)
     {
-        var prompt = $"Verify this corrected draft against every ground-truth fact in the original prompt. " +
+        var prompt = $"Verify this corrected draft against every ground-truth fact and narrative continuity rule in the original prompt. " +
                      $"Return Pass=true only if it contains no factual contradiction, player/owner misattribution, " +
-                     $"score/pick change, impossible historical claim, or internal username.\n\n" +
+                     $"score/pick change, impossible historical claim, internal username, or forbidden narrative-awareness reference.\n\n" +
                      $"## CORRECTED DRAFT:\n{patchedDraft}\n\n## ORIGINAL PROMPT:\n{originalPrompt}";
         var raw = await _proofreaderAgent!.GenerateAsync(
             prompt,
@@ -882,10 +901,14 @@ internal sealed class RecapAgent
                 }).ToList());
 
             const string outputSchema = """{"sections":[{"id":"same-input-id","markdown":"revised markdown"}]}""";
+            var narrativeInstruction = NarrativePolicyFor(env).InstructionFor(NarrativeSurface.Editorial);
             var prompt = $"""
                 You are the final narrative editor for a fantasy-football weekly recap.
 
                 Make these independently written sections feel like one column. Ensure the league intro leads with the supplied lead story, make energy proportional to each excitement level, improve transitions and sentence rhythm, and remove repeated scores, conclusions, jokes, and sentence shapes. Preserve strong specific lines.
+
+                NARRATIVE CONTINUITY POLICY:
+                {narrativeInstruction}
 
                 IMMUTABLE CONTENT:
                 Do not change names, ownership, matchup membership, players, scores, margins, records, ranks, streaks, projections, confidence, picks, X-factors, transactions, dates, links, injury certainty, prediction meaning, or any ground-truth fact. Do not add history, chronology, owner behavior, medical claims, family relationships, locker-room scenes, betting information, or internal usernames. If stronger prose would require a new fact, keep the existing factual statement and improve only its rhythm or placement.
@@ -928,7 +951,7 @@ internal sealed class RecapAgent
                 .ToArray();
 
             var verificationPrompt = $"""
-                Verify the edited narrative against the authoritative evidence. Return Pass=true only when it contains no factual contradiction, changed score or result, player/owner misattribution, unsupported chronology/history/medical claim, or internal username.
+                Verify the edited narrative against the authoritative evidence and narrative continuity policy. Return Pass=true only when it contains no factual contradiction, changed score or result, player/owner misattribution, unsupported chronology/history/medical claim, internal username, or narrative-awareness reference forbidden by or exceeding that policy.
 
                 ## EDITED NARRATIVE
                 {editedLeague}
@@ -937,6 +960,9 @@ internal sealed class RecapAgent
 
                 ## AUTHORITATIVE EVIDENCE
                 {JsonSerializer.Serialize(env, JsonOpts)}
+
+                ## NARRATIVE CONTINUITY POLICY
+                {narrativeInstruction}
                 """;
             var verificationRaw = await _proofreaderAgent.GenerateAsync(
                 verificationPrompt,

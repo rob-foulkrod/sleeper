@@ -29,7 +29,8 @@ public sealed record RecapEnvelope(
     PreviouslyOnLeague? PreviouslyOnLeague = null,
     List<string>? BannedPhrases = null,
     SeasonOutcome? SeasonOutcome = null,
-    WeeklyInjuryReport? InjuryReport = null
+    WeeklyInjuryReport? InjuryReport = null,
+    NarrativeContext? Narrative = null
 );
 
 public sealed record RecapEnvelopeBuildOptions(bool PersistSnapshots = true, InjuryReportWindow? InjuryWindow = null);

@@ -51,6 +51,32 @@ public class LeagueDataTests
         snapshot.TryGetProperty("champion", out _).Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(6, false)]
+    [InlineData(7, true)]
+    [InlineData(10, true)]
+    public void PublicWeeklyEditionNeverExposesRawNarrativeState(int level, bool expectsCues)
+    {
+        using var input = JsonDocument.Parse($$"""
+            {
+              "season": 2026,
+              "completed_week": 4,
+              "_narrative": { "sentience_level": {{level}} },
+              "teams": []
+            }
+            """);
+
+        var projected = SiteDataBuilder.BuildPublicWeeklyEdition(input.RootElement);
+        var json = projected.ToJsonString();
+
+        json.Should().NotContain("sentience_level");
+        json.Should().NotContain("_narrative");
+        projected.ContainsKey("editorial_cues").Should().Be(expectsCues);
+        if (expectsCues)
+            projected["editorial_cues"]!["generator"]!.GetValue<string>().Should().NotBeNullOrWhiteSpace();
+    }
+
     private static readonly string DataPath =
         Path.Combine(RecapPaths.WorkspaceRoot, "site", "src", "data", "league.json");
 

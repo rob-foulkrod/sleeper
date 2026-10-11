@@ -177,6 +177,14 @@ recaps/{season}/week-NN.md
 
 AI behavior: prefers the signed-in GitHub Copilot SDK session, with managed Foundry agents as a fallback. If neither backend is available, the app writes a data-only markdown envelope dump for debugging. Copilot uses the configured game writer for matchup sections, the league writer for league-wide synthesis, and the proofreader for factual checks. Deterministic drama profiles calibrate each matchup and the week from Routine through Defining so excitement follows verified stakes, margins, lineup swings, and scoring rather than free-form hype. Forecast output includes one capsule per matchup. When a proofreader is configured, a final synthesis pass may revise only narrative fragments; deterministic tables remain unchanged, and the revision is accepted only after a second factual check passes.
 
+The internal editorial progression is configured per edition in
+`datafiles/narrative-state.json`. Missing historical entries resolve to level `0`.
+Before generating a new edition, add exactly one season/week entry. A level may
+hold steady or increase by one; ranges outside `0` through `10`, regressions,
+jumps, duplicate entries, and disagreements with filed snapshots fail generation.
+The progression changes framing only. Factual, privacy, injury-evidence, and
+prediction controls remain authoritative.
+
 ### `season`
 
 Build the season-in-review recap and sidecar artifacts.
@@ -398,6 +406,17 @@ articles, and updates current franchise names without rewriting historical names
 completed-season records. The homepage and current season page render that edition.
 Owner and franchise pages show the in-season record separately from historical tables.
 Publication timestamps come from the snapshot, not the time of the latest site rebuild.
+For a late recap with no upcoming preview, the homepage leads with the completed
+week's recap and keeps the verified upcoming fixtures separate. Do not backfill
+predictions once that week's games are underway.
+
+Before running the script for a missing edition, add its explicit
+`sentience_level` entry to `datafiles/narrative-state.json`. The script snapshots
+that value under its internal `_narrative` field and refuses invalid progression.
+Once filed, the snapshot is authoritative and must not be rewritten to change the
+level. `site-data` removes `_narrative` and the raw numeric level from public JSON;
+only policy-approved editorial cues can be projected at later levels. Existing
+snapshots without this field remain level `0`.
 
 After editorial review, run `site-data`, `npm run build --prefix site`, and the reporting
 test project. Review the homepage and both articles on desktop and mobile in both themes.
