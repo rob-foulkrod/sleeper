@@ -36,7 +36,7 @@ const lows = data.records.single_week_lows.filter((h) => h.owner_name === o.name
         <>
           {o.first_season}{o.last_season !== o.first_season ? `–${o.last_season}` : ''} ·
           {' '}{record(o.career.wins, o.career.losses, o.career.ties)} in the regular season ·
-          {' '}best finish {o.career.best_finish}
+          {' '}best finish {o.career.best_finish ?? '—'}
           {!o.active && <> · <span class="stamp">no longer in the league</span></>}
         </>
       ) : (
@@ -50,7 +50,7 @@ const lows = data.records.single_week_lows.filter((h) => h.owner_name === o.name
     <h2 class="ruled">{CURRENT_EDITION.season}: through Week {CURRENT_EDITION.completed_week}</h2>
     <p class="dek"><a href={`${base}/franchises/${current.franchise_id}/`}>{current.team_name}</a> / {record(current.wins, current.losses, current.ties)} / {pts(current.points_for)} PF / {pts(current.points_against)} PA</p>
     <p><a href={`${base}/${CURRENT_EDITION.season}/`}>The current season</a></p>
-    <p class="slug">Historical tables below cover completed seasons.</p>
+    <p class="slug">Career totals and the season table include these in-progress results.</p>
   </div>}
 
   {o.seasons.length > 0 && (
@@ -77,7 +77,7 @@ const lows = data.records.single_week_lows.filter((h) => h.owner_name === o.name
                   <td class="wide">{s.team_name}</td>
                   <td class="num">{record(s.wins, s.losses, s.ties)}</td>
                   <td class="num">{pts(s.points_for)}</td>
-                  <td class="num">{s.final_place}</td>
+                  <td class="num">{s.final_place ?? 'In progress'}</td>
                 </tr>
               ))}
           </tbody>

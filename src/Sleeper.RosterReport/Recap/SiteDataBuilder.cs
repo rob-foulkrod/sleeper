@@ -39,7 +39,7 @@ internal static class SiteDataBuilder
             var aggregatePath = Path.Combine(dir, "season-aggregate.json");
             if (!File.Exists(aggregatePath))
             {
-                Console.WriteLine($"  {year}: no season-aggregate.json, skipping results.");
+                Console.WriteLine($"  {year}: no season-aggregate.json, skipping completed-season archive.");
                 continue;
             }
 
@@ -76,9 +76,16 @@ internal static class SiteDataBuilder
                     team.GetProperty("team_name").GetString()!);
             }
         }
+        var currentResults = currentEdition is { } resultsEdition
+            && seasons.All(season => season.Year != ReadEditionSeason(resultsEdition))
+                ? ParseCurrentSeason(resultsEdition)
+                : null;
+        if (currentResults is not null)
+            Console.WriteLine($"  {currentResults.Year}: including active results through Week {currentResults.CompletedWeek} in records.");
+
         var franchises = BuildFranchises(seasons, currentOwners);
-        var owners = BuildOwners(seasons, currentOwners);
-        var headToHead = BuildHeadToHead(seasons);
+        var owners = BuildOwners(seasons, currentOwners, currentResults);
+        var headToHead = BuildHeadToHead(seasons, currentResults);
         var publicEdition = currentEdition is { } loadedEdition
             ? BuildPublicWeeklyEdition(loadedEdition)
             : null;
@@ -103,11 +110,13 @@ internal static class SiteDataBuilder
                 // elimination is exactly the kind of result a rivalry claim rests on.
                 notes = new[]
                 {
-                    "Records cover the seasons in this archive, 2024 onward, and the regular season only.",
-                    "Head-to-head counts every game two owners have played, playoffs and consolation included.",
+                    currentResults is null
+                        ? "Records cover the completed seasons in this archive, 2024 onward, and the regular season only."
+                        : $"Records cover completed seasons from 2024 onward and {currentResults.Year} through Week {currentResults.CompletedWeek}, regular season only.",
+                    "Head-to-head counts every available game two owners have played, playoffs and consolation included.",
                     "Records are per owner. A franchise that changed hands does not transfer its record."
                 },
-                all_time = BuildAllTime(seasons),
+                all_time = BuildAllTime(seasons, currentResults),
                 championships = seasons
                     .Where(s => s.Aggregate.Outcome?.Champion is not null)
                     .Select(s => new
@@ -118,8 +127,8 @@ internal static class SiteDataBuilder
                         runner_up = s.Aggregate.Outcome.RunnerUp?.OwnerRealName
                     })
                     .ToList(),
-                single_week_highs = BuildSingleWeekExtremes(seasons, best: true),
-                single_week_lows = BuildSingleWeekExtremes(seasons, best: false),
+                single_week_highs = BuildSingleWeekExtremes(seasons, currentResults, best: true),
+                single_week_lows = BuildSingleWeekExtremes(seasons, currentResults, best: false),
                 head_to_head = headToHead
             },
             articles = BuildArticleIndex(root, recapsRoot),
@@ -658,13 +667,15 @@ internal static class SiteDataBuilder
     /// he earned and is marked inactive rather than being folded into whoever took the slot.
     /// An incoming owner appears with an empty record rather than inheriting one.
     /// </summary>
-    private static List<OwnerEntry> BuildOwners(List<SeasonBundle> seasons, Dictionary<int, CurrentTeam> currentOwners)
+    private static List<OwnerEntry> BuildOwners(
+        List<SeasonBundle> seasons,
+        Dictionary<int, CurrentTeam> currentOwners,
+        CurrentSeasonResults? currentResults)
     {
         var activeNames = new HashSet<string>(currentOwners.Values.Select(v => v.OwnerName), StringComparer.OrdinalIgnoreCase);
 
-        var ownerSeasons = seasons
-            .SelectMany(s => s.Aggregate.Teams.Select(t => new { s.Year, Team = t }))
-            .GroupBy(x => x.Team.OwnerRealName, StringComparer.OrdinalIgnoreCase)
+        var ownerSeasons = BuildRecordTeams(seasons, currentResults)
+            .GroupBy(x => x.OwnerName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         var result = ownerSeasons.Select(group =>
@@ -676,27 +687,18 @@ internal static class SiteDataBuilder
                 activeNames.Contains(group.Key),
                 entries[0].Year,
                 entries[^1].Year,
-                entries.Select(e => e.Team.RosterId).Distinct().OrderBy(x => x).ToList(),
+                entries.Select(e => e.RosterId).Distinct().OrderBy(x => x).ToList(),
                 entries.Select(e => (object)new
                 {
                     season = e.Year,
-                    team_name = e.Team.FinalTeamName,
-                    wins = e.Team.RegularSeasonWins,
-                    losses = e.Team.RegularSeasonLosses,
-                    ties = e.Team.RegularSeasonTies,
-                    points_for = e.Team.RegularSeasonPointsFor,
-                    final_place = e.Team.FinalPlace
+                    team_name = e.TeamName,
+                    wins = e.Wins,
+                    losses = e.Losses,
+                    ties = e.Ties,
+                    points_for = e.PointsFor,
+                    final_place = e.FinalPlace
                 }).ToList(),
-                new OwnerCareer(
-                    entries.Count,
-                    entries.Sum(e => e.Team.RegularSeasonWins),
-                    entries.Sum(e => e.Team.RegularSeasonLosses),
-                    entries.Sum(e => e.Team.RegularSeasonTies),
-                    Math.Round(entries.Sum(e => e.Team.RegularSeasonPointsFor), 2),
-                    Math.Round(entries.Sum(e => e.Team.RegularSeasonPointsAgainst), 2),
-                    entries.Count(e => e.Team.FinalPlace == 1),
-                    entries.Where(e => e.Team.FinalPlace.HasValue).Select(e => e.Team.FinalPlace).Min(),
-                    entries.Where(e => e.Team.FinalPlace.HasValue).Select(e => e.Team.FinalPlace).Max()));
+                BuildOwnerCareer(entries));
         }).ToList();
 
         var known = new HashSet<string>(ownerSeasons.Select(g => g.Key), StringComparer.OrdinalIgnoreCase);
@@ -715,6 +717,25 @@ internal static class SiteDataBuilder
         }
 
         return result.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static OwnerCareer BuildOwnerCareer(List<RecordTeam> entries)
+    {
+        var finishes = entries
+            .Where(entry => entry.FinalPlace.HasValue)
+            .Select(entry => entry.FinalPlace!.Value)
+            .ToList();
+
+        return new OwnerCareer(
+            entries.Count,
+            entries.Sum(entry => entry.Wins),
+            entries.Sum(entry => entry.Losses),
+            entries.Sum(entry => entry.Ties),
+            Math.Round(entries.Sum(entry => entry.PointsFor), 2),
+            Math.Round(entries.Sum(entry => entry.PointsAgainst), 2),
+            entries.Count(entry => entry.FinalPlace == 1),
+            finishes.Count == 0 ? null : finishes.Min(),
+            finishes.Count == 0 ? null : finishes.Max());
     }
 
     internal sealed record OwnerEntry(
@@ -737,50 +758,85 @@ internal static class SiteDataBuilder
         int? BestFinish,
         int? WorstFinish);
 
-    private static List<object> BuildAllTime(List<SeasonBundle> seasons)
-        => seasons
-            .SelectMany(s => s.Aggregate.Teams)
-            .GroupBy(t => t.OwnerRealName, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new
+    private static List<RecordTeam> BuildRecordTeams(
+        List<SeasonBundle> seasons,
+        CurrentSeasonResults? currentResults)
+    {
+        var teams = seasons
+            .SelectMany(season => season.Aggregate.Teams.Select(team => new RecordTeam(
+                season.Year,
+                team.RosterId,
+                team.OwnerRealName,
+                team.FinalTeamName,
+                team.RegularSeasonWins,
+                team.RegularSeasonLosses,
+                team.RegularSeasonTies,
+                team.RegularSeasonPointsFor,
+                team.RegularSeasonPointsAgainst,
+                team.FinalPlace)))
+            .ToList();
+
+        if (currentResults is not null)
+            teams.AddRange(currentResults.Teams);
+
+        return teams;
+    }
+
+    private static List<object> BuildAllTime(List<SeasonBundle> seasons, CurrentSeasonResults? currentResults)
+        => BuildRecordTeams(seasons, currentResults)
+            .GroupBy(team => team.OwnerName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new
             {
-                owner_name = g.Key,
-                wins = g.Sum(t => t.RegularSeasonWins),
-                losses = g.Sum(t => t.RegularSeasonLosses),
-                ties = g.Sum(t => t.RegularSeasonTies),
-                points_for = Math.Round(g.Sum(t => t.RegularSeasonPointsFor), 2),
-                points_against = Math.Round(g.Sum(t => t.RegularSeasonPointsAgainst), 2),
-                championships = g.Count(t => t.FinalPlace == 1)
+                owner_name = group.Key,
+                wins = group.Sum(team => team.Wins),
+                losses = group.Sum(team => team.Losses),
+                ties = group.Sum(team => team.Ties),
+                points_for = Math.Round(group.Sum(team => team.PointsFor), 2),
+                points_against = Math.Round(group.Sum(team => team.PointsAgainst), 2),
+                championships = group.Count(team => team.FinalPlace == 1)
             })
-            .OrderByDescending(x => x.wins)
-            .ThenByDescending(x => x.points_for)
+            .OrderByDescending(entry => entry.wins)
+            .ThenByDescending(entry => entry.points_for)
             .Cast<object>()
             .ToList();
 
-    private static List<object> BuildSingleWeekExtremes(List<SeasonBundle> seasons, bool best)
+    private static List<object> BuildSingleWeekExtremes(
+        List<SeasonBundle> seasons,
+        CurrentSeasonResults? currentResults,
+        bool best)
     {
-        var all = seasons.SelectMany(s => s.Aggregate.Teams.SelectMany(t => t.Weekly
-            .Where(w => w.PointsFor > 0m)
-            .Select(w => new
-            {
-                season = s.Year,
-                week = w.Week,
-                owner_name = t.OwnerRealName,
-                team_name = w.CurrentTeamName ?? t.FinalTeamName,
-                points = w.PointsFor
-            })));
+        var all = seasons.SelectMany(season => season.Aggregate.Teams.SelectMany(team => team.Weekly
+            .Where(week => week.PointsFor > 0m)
+            .Select(week => new RecordWeek(
+                season.Year,
+                week.Week,
+                team.OwnerRealName,
+                week.CurrentTeamName ?? team.FinalTeamName,
+                week.PointsFor))))
+            .ToList();
+
+        if (currentResults is not null)
+            all.AddRange(currentResults.Weeks);
 
         var ordered = best
-            ? all.OrderByDescending(x => x.points)
-            : all.OrderBy(x => x.points);
+            ? all.OrderByDescending(entry => entry.Points)
+            : all.OrderBy(entry => entry.Points);
 
-        return ordered.Take(10).Cast<object>().ToList();
+        return ordered.Take(10).Select(entry => (object)new
+        {
+            season = entry.Year,
+            week = entry.Week,
+            owner_name = entry.OwnerName,
+            team_name = entry.TeamName,
+            points = entry.Points
+        }).ToList();
     }
 
     /// <summary>
     /// Every owner pairing across every season, so a rivalry claim on the site is backed by
     /// the actual series rather than by a writer's memory of it.
     /// </summary>
-    private static List<object> BuildHeadToHead(List<SeasonBundle> seasons)
+    private static List<object> BuildHeadToHead(List<SeasonBundle> seasons, CurrentSeasonResults? currentResults)
     {
         var records = new Dictionary<(string A, string B), H2H>();
 
@@ -794,6 +850,18 @@ internal static class SiteDataBuilder
 
                 Record(home, away, game.HomePoints, game.AwayPoints);
                 Record(away, home, game.AwayPoints, game.HomePoints);
+            }
+        }
+
+        if (currentResults is not null)
+        {
+            foreach (var game in currentResults.Games)
+            {
+                if (string.Equals(game.HomeOwnerName, game.AwayOwnerName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                Record(game.HomeOwnerName, game.AwayOwnerName, game.HomePoints, game.AwayPoints);
+                Record(game.AwayOwnerName, game.HomeOwnerName, game.AwayPoints, game.HomePoints);
             }
         }
 
@@ -889,6 +957,61 @@ internal static class SiteDataBuilder
         return edition.Clone();
     }
 
+    private static int ReadEditionSeason(JsonElement edition)
+    {
+        var season = edition.GetProperty("season");
+        return season.ValueKind == JsonValueKind.Number
+            ? season.GetInt32()
+            : int.Parse(season.GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static CurrentSeasonResults ParseCurrentSeason(JsonElement edition)
+    {
+        var year = ReadEditionSeason(edition);
+        var completedWeek = edition.GetProperty("completed_week").GetInt32();
+        var teams = edition.GetProperty("teams").EnumerateArray()
+            .Select(team => new RecordTeam(
+                year,
+                team.GetProperty("franchise_id").GetInt32(),
+                team.GetProperty("owner_name").GetString()!,
+                team.GetProperty("team_name").GetString()!,
+                team.GetProperty("wins").GetInt32(),
+                team.GetProperty("losses").GetInt32(),
+                team.GetProperty("ties").GetInt32(),
+                team.GetProperty("points_for").GetDecimal(),
+                team.GetProperty("points_against").GetDecimal(),
+                FinalPlace: null))
+            .ToList();
+
+        var games = new List<CurrentGame>();
+        var weeks = new List<RecordWeek>();
+        foreach (var weekElement in edition.GetProperty("weeks").EnumerateArray())
+        {
+            var week = weekElement.GetProperty("week").GetInt32();
+            if (week > completedWeek) continue;
+
+            foreach (var gameElement in weekElement.GetProperty("games").EnumerateArray())
+            {
+                var home = gameElement.GetProperty("home");
+                var away = gameElement.GetProperty("away");
+                var homeOwner = home.GetProperty("owner_name").GetString()!;
+                var awayOwner = away.GetProperty("owner_name").GetString()!;
+                var homeTeam = home.GetProperty("team_name").GetString()!;
+                var awayTeam = away.GetProperty("team_name").GetString()!;
+                var homePoints = home.GetProperty("points").GetDecimal();
+                var awayPoints = away.GetProperty("points").GetDecimal();
+
+                games.Add(new CurrentGame(homeOwner, awayOwner, homePoints, awayPoints));
+                if (homePoints > 0m)
+                    weeks.Add(new RecordWeek(year, week, homeOwner, homeTeam, homePoints));
+                if (awayPoints > 0m)
+                    weeks.Add(new RecordWeek(year, week, awayOwner, awayTeam, awayPoints));
+            }
+        }
+
+        return new CurrentSeasonResults(year, completedWeek, teams, weeks, games);
+    }
+
     internal static JsonObject BuildPublicWeeklyEdition(JsonElement edition)
     {
         var projected = JsonNode.Parse(edition.GetRawText())?.AsObject()
@@ -975,6 +1098,38 @@ internal static class SiteDataBuilder
     }
 
     private sealed record KeeperSummaryEntry(int RosterId, string? OwnerName, int KeeperCount, List<int>? RoundsSpent);
+
+    private sealed record RecordTeam(
+        int Year,
+        int RosterId,
+        string OwnerName,
+        string TeamName,
+        int Wins,
+        int Losses,
+        int Ties,
+        decimal PointsFor,
+        decimal PointsAgainst,
+        int? FinalPlace);
+
+    private sealed record RecordWeek(
+        int Year,
+        int Week,
+        string OwnerName,
+        string TeamName,
+        decimal Points);
+
+    private sealed record CurrentGame(
+        string HomeOwnerName,
+        string AwayOwnerName,
+        decimal HomePoints,
+        decimal AwayPoints);
+
+    private sealed record CurrentSeasonResults(
+        int Year,
+        int CompletedWeek,
+        List<RecordTeam> Teams,
+        List<RecordWeek> Weeks,
+        List<CurrentGame> Games);
 
     private sealed record SeasonBundle(int Year, SeasonAggregate Aggregate, SeasonAwards? Awards, List<Game> Games);
 

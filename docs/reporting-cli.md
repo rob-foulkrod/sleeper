@@ -175,7 +175,7 @@ Output:
 recaps/{season}/week-NN.md
 ```
 
-AI behavior: prefers the signed-in GitHub Copilot SDK session, with managed Foundry agents as a fallback. If neither backend is available, the app writes a data-only markdown envelope dump for debugging. Copilot uses the configured game writer for matchup sections, the league writer for league-wide synthesis, and the proofreader for factual checks. Deterministic drama profiles calibrate each matchup and the week from Routine through Defining so excitement follows verified stakes, margins, lineup swings, and scoring rather than free-form hype. Forecast output includes one capsule per matchup. When a proofreader is configured, a final synthesis pass may revise only narrative fragments; deterministic tables remain unchanged, and the revision is accepted only after a second factual check passes.
+AI behavior: uses the signed-in GitHub Copilot CLI session. The CLI's live model list is authoritative: when a configured role model is unavailable, the app selects another configured model that is live in the same Copilot session, then falls back to the first live Copilot model. It does not switch recap generation to Foundry. If Copilot is unavailable or reports no models, the app writes a data-only markdown envelope dump for debugging. Copilot uses the resolved game writer for matchup sections, the resolved league writer for league-wide synthesis, and the resolved proofreader for factual checks. Deterministic drama profiles calibrate each matchup and the week from Routine through Defining so excitement follows verified stakes, margins, lineup swings, and scoring rather than free-form hype. Forecast output includes one capsule per matchup. When a proofreader is configured, a final synthesis pass may revise only narrative fragments; deterministic tables remain unchanged, and the revision is accepted only after a second factual check passes.
 
 The internal editorial progression is configured per edition in
 `datafiles/narrative-state.json`. Missing historical entries resolve to level `0`.
@@ -258,7 +258,9 @@ timeout, and game-story concurrency are configured under the `Copilot` section i
 | Proofreader | `Copilot:ProofreaderModel` | `gpt-5-mini` | Checks generated prose against structured facts. |
 | Evaluator | `Copilot:EvaluatorModel` | `gpt-5.6-sol` | Blindly compares replay candidates using a different model family. |
 
-The evaluator must differ from both writer models for blind replay comparisons.
+Configured model names are preferences rather than availability guarantees. Each role
+is resolved against the signed-in CLI session's live model list. The evaluator must
+differ from both resolved writer models for blind replay comparisons.
 Normal recap and season commands do not require the evaluator model to be
 available because they never call it.
 
@@ -272,8 +274,8 @@ Remove-Item Env:\Copilot__LeagueWriterModel
 
 The same double-underscore convention works for `WriterModel`, `ProofreaderModel`,
 and `EvaluatorModel`. GitHub's Copilot model roster changes frequently. Each run
-checks its required model IDs with the SDK's live model list and reports the
-available IDs if one has been retired.
+resolves its configured preferences against the SDK's live model list and selects
+another live Copilot model when a preference has been retired.
 
 ### `rosters-history`
 
@@ -323,9 +325,9 @@ Merge every season's sidecars into the single file the published site renders fr
 dotnet run --project src/Sleeper.RosterReport/Sleeper.RosterReport.csproj -- site-data
 ```
 
-Takes no options. It reads `recaps/{season}/season-aggregate.json`, `season-awards.json`, and
-the recap markdown in `recaps/**`, pulls per-week scores from Sleeper's public read API, and
-writes:
+Takes no options. It reads `recaps/{season}/season-aggregate.json`, `season-awards.json`,
+the latest `week-NN-data.json`, and the recap markdown in `recaps/**`, pulls completed-season
+per-week scores from Sleeper's public read API, and writes:
 
 ```text
 site/src/data/league.json
@@ -333,7 +335,10 @@ site/src/data/league.json
 
 This is the privacy boundary. Sleeper usernames are internal keys and are stripped here;
 owners reach the site as first names only. Standings, scores, records, and the article index
-are all rendered from this file — never from parsed prose.
+are all rendered from this file — never from parsed prose. During an active season, the record
+book and owner career totals include the latest edition's completed weeks. Championships and
+final places remain completed-season facts. If an aggregate exists for the edition's season,
+`site-data` uses that aggregate instead of counting the edition twice.
 
 When a current weekly edition exists, `site-data` also builds `first_quarter` from nflverse
 regular-season player stat lines for Weeks 1–4. It scores every QB, RB, WR, TE, and K with
@@ -363,7 +368,9 @@ In **VS Code Copilot Chat**, invoke the repository's
 This closes Week 3 and prepares Week 4: injury research, NFL/Sleeper results,
 roster snapshots, transaction audit, missing recap and preview articles, dated
 homepage data, editorial review, site build, tests, and local browser checks.
-It leaves a local preview running without committing or publishing.
+It leaves a local preview running without committing or publishing. The skill
+tracks explicit completion proof for each stage, resumes missing work, and reports
+blocked dependencies instead of treating a command attempt as a completed stage.
 
 ```text
 /week-end 3 season 2026 publish
@@ -377,6 +384,13 @@ Chat skill arguments, not terminal or reporting CLI flags. Existing filed articl
 predictions, and weekly snapshots are reused unchanged; reruns fill missing work.
 External evidence or validation failures block publication. Week 17 requires a
 season-closeout outlook; the league has no Week 18 fantasy matchup preview.
+
+Narrative continuity is also a required pre-generation gate. The closeout reviews
+the prior filed edition and `docs/being-narrative-notes.md`, then normally holds
+the current narrative level. It may advance by one only when the next beat is
+earned by filed continuity and verified league events. Advancement is never
+automatic, and Level 10 requires a deliberate narrative event. The raw numeric
+state and private rationale remain internal.
 
 ### Current Weekly Editions
 
@@ -402,9 +416,10 @@ leave previously filed predictions and notes intact. Discuss their outcomes in n
 Do not run the recap generator over an existing article unless replacement is explicitly intended.
 
 `site-data` exports the latest snapshot as `current_edition`, recognizes `weekly-preview`
-articles, and updates current franchise names without rewriting historical names or
-completed-season records. The homepage and current season page render that edition.
-Owner and franchise pages show the in-season record separately from historical tables.
+articles, and updates current franchise names without rewriting historical names or completed
+season aggregates. The homepage and current season page render that edition. The record book
+and owner career tables include its completed results; franchise timelines continue to show
+completed seasons, with the active record presented separately.
 Publication timestamps come from the snapshot, not the time of the latest site rebuild.
 For a late recap with no upcoming preview, the homepage leads with the completed
 week's recap and keeps the verified upcoming fixtures separate. Do not backfill
@@ -423,16 +438,19 @@ test project. Review the homepage and both articles on desktop and mobile in bot
 The scheduled publishing workflow rebuilds existing content; it does not fetch a new
 weekly snapshot or write the next edition automatically.
 
-### Existing Recap Workflow
+### Manual recap-only workflow
 
-During the season the whole cycle is three commands and a commit.
+The lower-level recap command remains available for drafting or debugging, but it
+does not perform the full weekly closeout described above.
 
 1. **Write the recap.** `recap --week N` produces `recaps/{season}/week-NN.md` with the
    Copilot writer and the `gpt-5-mini` proofreader. Numbers come from the data; the model
    only explains and entertains.
 2. **Read it.** Check the scores and standings against the sidecars before you accept it.
    Nothing downstream re-checks the prose.
-3. **Commit it to `main`.** That is the whole publish step.
+3. **Do not publish it as a completed week by itself.** Injury evidence, NFL
+   finality, roster and transaction exports, the weekly edition, standalone
+   preview, site validation, and deployment verification remain separate gates.
 
 `.github/workflows/publish.yml` takes it from there: it regenerates `league.json`, builds the
 site, runs the privacy guard against both the markdown and the built `site/dist`, and deploys

@@ -11,15 +11,23 @@ internal sealed class CopilotAgentHost : IAsyncDisposable
     private readonly CopilotClient _client;
     private readonly CopilotAgentSettings _settings;
     private readonly CopilotUsageLedger _usage;
+    private readonly CopilotModelSelection _modelSelection;
+
+    public string WriterModel => _modelSelection.WriterModel;
+    public string LeagueWriterModel => _modelSelection.LeagueWriterModel;
+    public string ProofreaderModel => _modelSelection.ProofreaderModel;
+    public string EvaluatorModel => _modelSelection.EvaluatorModel;
 
     private CopilotAgentHost(
         CopilotClient client,
         CopilotAgentSettings settings,
-        CopilotUsageLedger usage)
+        CopilotUsageLedger usage,
+        CopilotModelSelection modelSelection)
     {
         _client = client;
         _settings = settings;
         _usage = usage;
+        _modelSelection = modelSelection;
     }
 
     public static async Task<CopilotAgentHost> StartAsync(
@@ -44,25 +52,22 @@ internal sealed class CopilotAgentHost : IAsyncDisposable
         try
         {
             await client.StartAsync(cancellationToken).ConfigureAwait(false);
+            var modelSelection = skipModelVerification
+                ? new CopilotModelSelection(settings.WriterModel, settings.LeagueWriterModel, settings.ProofreaderModel, settings.EvaluatorModel)
+                : ResolveModelSelection(
+                    settings,
+                    (await client.ListModelsAsync(cancellationToken).ConfigureAwait(false)).Select(model => model.Id),
+                    requireEvaluatorModel);
             if (!skipModelVerification)
             {
-                var models = await client.ListModelsAsync(cancellationToken).ConfigureAwait(false);
-                var available = models.Select(model => model.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                VerifyModel(available, settings.WriterModel, "writer");
-                VerifyModel(available, settings.LeagueWriterModel, "league writer");
-                VerifyModel(available, settings.ProofreaderModel, "proofreader");
+                LogFallback("writer", settings.WriterModel, modelSelection.WriterModel);
+                LogFallback("league writer", settings.LeagueWriterModel, modelSelection.LeagueWriterModel);
+                LogFallback("proofreader", settings.ProofreaderModel, modelSelection.ProofreaderModel);
                 if (requireEvaluatorModel)
-                {
-                    VerifyModel(available, settings.EvaluatorModel, "evaluator");
-                    if (string.Equals(settings.WriterModel, settings.EvaluatorModel, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(settings.LeagueWriterModel, settings.EvaluatorModel, StringComparison.OrdinalIgnoreCase))
-                    {
-                        throw new InvalidOperationException("Writer models and EvaluatorModel must differ for the blind spike.");
-                    }
-                }
+                    LogFallback("evaluator", settings.EvaluatorModel, modelSelection.EvaluatorModel);
             }
 
-            return new CopilotAgentHost(client, settings, usage);
+            return new CopilotAgentHost(client, settings, usage, modelSelection);
         }
         catch
         {
@@ -71,10 +76,81 @@ internal sealed class CopilotAgentHost : IAsyncDisposable
         }
     }
 
+    internal static CopilotModelSelection ResolveModelSelection(
+        CopilotAgentSettings settings,
+        IEnumerable<string>? models,
+        bool requireEvaluatorModel = true)
+    {
+        var available = (models ?? [])
+            .Where(model => !string.IsNullOrWhiteSpace(model))
+            .Select(model => model.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (available.Length == 0)
+        {
+            throw new InvalidOperationException("Copilot reported no available models.");
+        }
+
+        var writer = SelectAvailableModel(
+            available,
+            [settings.WriterModel, settings.LeagueWriterModel, settings.ProofreaderModel, settings.EvaluatorModel]);
+        var leagueWriter = SelectAvailableModel(
+            available,
+            [settings.LeagueWriterModel, settings.WriterModel, settings.EvaluatorModel, settings.ProofreaderModel]);
+        var proofreader = SelectAvailableModel(
+            available,
+            [settings.ProofreaderModel, settings.WriterModel, settings.LeagueWriterModel, settings.EvaluatorModel]);
+        IReadOnlySet<string>? evaluatorDisallowed = requireEvaluatorModel
+            ? new HashSet<string>([writer, leagueWriter], StringComparer.OrdinalIgnoreCase)
+            : null;
+        var evaluator = SelectAvailableModel(
+            available,
+            [settings.EvaluatorModel, settings.ProofreaderModel],
+            evaluatorDisallowed);
+
+        return new CopilotModelSelection(writer, leagueWriter, proofreader, evaluator);
+    }
+
+    private static string SelectAvailableModel(
+        IReadOnlyList<string> available,
+        IEnumerable<string> preferences,
+        IReadOnlySet<string>? disallowed = null)
+    {
+        disallowed ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var availableSet = available.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var preference in preferences)
+        {
+            var candidate = preference.Trim();
+            if (!string.IsNullOrWhiteSpace(candidate) &&
+                availableSet.Contains(candidate) &&
+                !disallowed.Contains(candidate))
+            {
+                return available.First(model => model.Equals(candidate, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        var fallback = available.FirstOrDefault(model => !disallowed.Contains(model));
+
+        if (!string.IsNullOrWhiteSpace(fallback))
+            return fallback;
+
+        throw new InvalidOperationException(
+            $"Copilot model selection requires another available model. Available models: {string.Join(", ", available)}");
+    }
+
+    private static void LogFallback(string role, string configured, string resolved)
+    {
+        if (!configured.Equals(resolved, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(
+                $"  (Copilot {role} model '{configured}' is unavailable; using live model '{resolved}')");
+        }
+    }
+
     public IReportTextAgent CreateWriter(string instructions, string? model = null)
         => new CopilotReportTextAgent(
             _client,
-            model ?? _settings.WriterModel,
+            model ?? _modelSelection.WriterModel,
             _settings.ReasoningEffort,
             TimeSpan.FromSeconds(_settings.TimeoutSeconds),
             instructions,
@@ -83,7 +159,7 @@ internal sealed class CopilotAgentHost : IAsyncDisposable
     public IReportTextAgent CreateEvaluator(string instructions)
         => new CopilotReportTextAgent(
             _client,
-            _settings.EvaluatorModel,
+            _modelSelection.EvaluatorModel,
             _settings.ReasoningEffort,
             TimeSpan.FromSeconds(_settings.TimeoutSeconds),
             instructions,
@@ -98,14 +174,14 @@ internal sealed class CopilotAgentHost : IAsyncDisposable
             instructions,
             _usage);
 
-    private static void VerifyModel(IReadOnlySet<string> available, string model, string role)
-    {
-        if (!available.Contains(model))
-            throw new InvalidOperationException($"Copilot {role} model '{model}' is unavailable. Available models: {string.Join(", ", available.Order())}");
-    }
-
     public ValueTask DisposeAsync() => _client.DisposeAsync();
 }
+
+internal sealed record CopilotModelSelection(
+    string WriterModel,
+    string LeagueWriterModel,
+    string ProofreaderModel,
+    string EvaluatorModel);
 
 internal sealed class CopilotReportTextAgent(
     CopilotClient client,

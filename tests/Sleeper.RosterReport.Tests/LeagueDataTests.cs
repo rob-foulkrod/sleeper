@@ -132,13 +132,65 @@ public class LeagueDataTests
         }
     }
 
+    [Fact]
+    public void CurrentEditionUpdatesOwnerCareersAndRecordBook()
+    {
+        var root = Load();
+        var edition = root.GetProperty("current_edition");
+        var currentSeason = edition.GetProperty("season").GetInt32();
+        var completedWeek = edition.GetProperty("completed_week").GetInt32();
+        var owners = root.GetProperty("owners").EnumerateArray().ToList();
+        var allTime = root.GetProperty("records").GetProperty("all_time").EnumerateArray().ToList();
+
+        foreach (var team in edition.GetProperty("teams").EnumerateArray())
+        {
+            var ownerName = team.GetProperty("owner_name").GetString();
+            var owner = owners.Single(entry => entry.GetProperty("name").GetString() == ownerName);
+            var ownerSeasons = owner.GetProperty("seasons").EnumerateArray().ToList();
+            var current = ownerSeasons.Single(season => season.GetProperty("season").GetInt32() == currentSeason);
+            current.GetProperty("wins").GetInt32().Should().Be(team.GetProperty("wins").GetInt32());
+            current.GetProperty("losses").GetInt32().Should().Be(team.GetProperty("losses").GetInt32());
+            current.GetProperty("points_for").GetDecimal().Should().Be(team.GetProperty("points_for").GetDecimal());
+
+            var record = allTime.Single(entry => entry.GetProperty("owner_name").GetString() == ownerName);
+            record.GetProperty("wins").GetInt32().Should()
+                .Be(ownerSeasons.Sum(season => season.GetProperty("wins").GetInt32()));
+            record.GetProperty("losses").GetInt32().Should()
+                .Be(ownerSeasons.Sum(season => season.GetProperty("losses").GetInt32()));
+        }
+
+        root.GetProperty("records").GetProperty("notes").EnumerateArray()
+            .Select(note => note.GetString())
+            .Should().Contain(note => note!.Contains($"{currentSeason} through Week {completedWeek}", StringComparison.Ordinal));
+
+        root.GetProperty("records").GetProperty("single_week_highs").EnumerateArray()
+            .Should().Contain(entry => entry.GetProperty("season").GetInt32() == 2026
+                && entry.GetProperty("week").GetInt32() == 5
+                && entry.GetProperty("owner_name").GetString() == "Rob"
+                && entry.GetProperty("points").GetDecimal() == 287.10m);
+
+        var currentOnlyOwner = owners.Single(owner =>
+        {
+            var seasons = owner.GetProperty("seasons").EnumerateArray().ToList();
+            return seasons.Count > 0
+                && seasons.All(season => season.GetProperty("season").GetInt32() == currentSeason);
+        });
+        var currentOwnerName = currentOnlyOwner.GetProperty("name").GetString();
+        root.GetProperty("records").GetProperty("head_to_head").EnumerateArray()
+            .Where(entry => entry.GetProperty("owner_name").GetString() == currentOwnerName)
+            .Sum(entry => entry.GetProperty("wins").GetInt32()
+                + entry.GetProperty("losses").GetInt32()
+                + entry.GetProperty("ties").GetInt32())
+            .Should().Be(completedWeek);
+    }
+
     /// <summary>
-    /// A franchise that changes hands must not hand its record to the incoming owner, and the
-    /// departing owner must not still read as active just because he played the last completed
-    /// season. This is the specific failure the continuity model exists to prevent.
+    /// A franchise that changes hands must not hand its completed history to the incoming owner,
+    /// and the departing owner must not still read as active merely because he played the last
+    /// completed season.
     /// </summary>
     [Fact]
-    public void FranchiseHandoffDoesNotTransferRecordOrActiveStatus()
+    public void FranchiseHandoffPreservesOwnerRecordsAndActiveStatus()
     {
         var root = Load();
         var franchises = root.GetProperty("franchises").EnumerateArray().ToList();
@@ -163,8 +215,10 @@ public class LeagueDataTests
             var departingOwner = owners.Single(o => o.GetProperty("name").GetString() == departing);
 
             incomingOwner.GetProperty("active").GetBoolean().Should().BeTrue();
-            incomingOwner.GetProperty("career").GetProperty("seasons_played").GetInt32().Should().Be(0,
-                "an incoming owner inherits the roster, not the results");
+            incomingOwner.GetProperty("seasons").EnumerateArray()
+                .Should().ContainSingle(season => season.GetProperty("season").GetInt32()
+                    == root.GetProperty("current_edition").GetProperty("season").GetInt32(),
+                    "an incoming owner starts a new record in the active season instead of inheriting prior results");
 
             departingOwner.GetProperty("active").GetBoolean().Should().BeFalse(
                 "a departed owner is not active even though he played the most recent completed season");

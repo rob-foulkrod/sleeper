@@ -84,7 +84,7 @@ export type Owner = {
     losses: number;
     ties: number;
     points_for: number;
-    final_place: number;
+    final_place?: number;
   }[];
   career: {
     seasons_played: number;
@@ -94,8 +94,8 @@ export type Owner = {
     points_for: number;
     points_against: number;
     championships: number;
-    best_finish: number;
-    worst_finish: number;
+    best_finish?: number;
+    worst_finish?: number;
   };
 };
 

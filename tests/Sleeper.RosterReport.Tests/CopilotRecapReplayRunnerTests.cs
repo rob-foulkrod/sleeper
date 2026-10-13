@@ -84,4 +84,86 @@ public class CopilotRecapReplayRunnerTests
         settings.ProofreaderModel.Should().Be("proofreader-model");
         settings.EvaluatorModel.Should().Be("evaluator-model");
     }
+
+    [Fact]
+    public void ResolveModelSelection_UsesAlternateLiveCopilotModel_WhenPreferredIsUnavailable()
+    {
+        var settings = new CopilotAgentSettings(
+            WriterModel: "claude-sonnet-5.5",
+            LeagueWriterModel: "claude-opus-5.5",
+            ProofreaderModel: "gpt-5-mini",
+            EvaluatorModel: "gpt-5.6-sol",
+            ReasoningEffort: "medium",
+            TimeoutSeconds: 180,
+            MaxConcurrency: 3);
+
+        var available = new[]
+        {
+            "fallback-writer",
+            "fallback-league",
+            "fallback-proofreader",
+            "fallback-evaluator"
+        };
+
+        var selection = CopilotAgentHost.ResolveModelSelection(settings, available, requireEvaluatorModel: false);
+
+        selection.WriterModel.Should().Be("fallback-writer");
+        selection.LeagueWriterModel.Should().Be("fallback-writer");
+        selection.ProofreaderModel.Should().Be("fallback-writer");
+        selection.EvaluatorModel.Should().Be("fallback-writer");
+    }
+
+    [Fact]
+    public void ResolveModelSelection_PrefersAnotherConfiguredCopilotModel_WhenRolePreferenceIsUnavailable()
+    {
+        var settings = new CopilotAgentSettings(
+            WriterModel: "writer-live",
+            LeagueWriterModel: "league-unavailable",
+            ProofreaderModel: "proofreader-live",
+            EvaluatorModel: "evaluator-live",
+            ReasoningEffort: "medium",
+            TimeoutSeconds: 180,
+            MaxConcurrency: 3);
+
+        var selection = CopilotAgentHost.ResolveModelSelection(
+            settings,
+            ["auto", "proofreader-live", "writer-live", "evaluator-live"],
+            requireEvaluatorModel: false);
+
+        selection.WriterModel.Should().Be("writer-live");
+        selection.LeagueWriterModel.Should().Be("writer-live");
+        selection.ProofreaderModel.Should().Be("proofreader-live");
+    }
+
+    [Fact]
+    public void ResolveModelSelection_ThrowsWhenCopilotReportsNoModels()
+    {
+        var settings = CopilotAgentSettings.FromConfiguration(new ConfigurationBuilder().Build());
+
+        var act = () => CopilotAgentHost.ResolveModelSelection(settings, [], requireEvaluatorModel: false);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*no available models*");
+    }
+
+    [Fact]
+    public void ResolveModelSelection_RequiresSeparateEvaluatorForBlindReplay()
+    {
+        var settings = new CopilotAgentSettings(
+            WriterModel: "writer-live",
+            LeagueWriterModel: "writer-live",
+            ProofreaderModel: "writer-live",
+            EvaluatorModel: "evaluator-unavailable",
+            ReasoningEffort: "medium",
+            TimeoutSeconds: 180,
+            MaxConcurrency: 3);
+
+        var act = () => CopilotAgentHost.ResolveModelSelection(
+            settings,
+            ["writer-live"],
+            requireEvaluatorModel: true);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*requires another available model*");
+    }
 }

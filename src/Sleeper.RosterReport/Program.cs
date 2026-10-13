@@ -998,12 +998,12 @@ async Task<int> RunWeeklyRecap(WeeklyRecapCommandOptions options)
     Console.WriteLine($"  envelope: {envelope.Owners.Count} owners, {envelope.Games.Count} games, {envelope.Themes.WaiverGrades.Count} waivers, {envelope.Themes.Trades.Count} trades, {envelope.AgentFetchHints.Count} fetch hints");
 
     await using var agentProvider = await ReportAgentProvider.CreateAsync(copilotSettings);
-    var agent = await agentProvider.TryCreateRecapAgentAsync(foundrySettings);
+    var agent = agentProvider.TryCreateRecapAgent();
     string output;
     if (agent is null)
     {
         Console.WriteLine();
-        Console.WriteLine("  (AI recap disabled -- no Copilot session and no Foundry configuration)");
+        Console.WriteLine("  (AI recap disabled -- no signed-in Copilot CLI session is available)");
         Console.WriteLine("  (writing data-only envelope dump for debugging)");
         output = DumpEnvelopeAsMarkdown(envelope);
     }
@@ -1069,12 +1069,12 @@ async Task<int> RunSeasonRecap(SeasonRecapCommandOptions options)
 
     // Run the agent.
     await using var agentProvider = await ReportAgentProvider.CreateAsync(copilotSettings);
-    var agent = await agentProvider.TryCreateSeasonAgentAsync(foundrySettings);
+    var agent = agentProvider.TryCreateSeasonAgent();
     string proseBody = "";
     if (agent is null)
     {
         Console.WriteLine();
-        Console.WriteLine("  (Season agent disabled -- no Copilot session and no Foundry configuration)");
+        Console.WriteLine("  (Season agent disabled -- no signed-in Copilot CLI session is available)");
     }
     else
     {

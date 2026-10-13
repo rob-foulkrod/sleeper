@@ -36,11 +36,32 @@ week: `/week-end 3` closes Week 3 and prepares Week 4.
 This is an agent-orchestrated workflow: web research and editorial judgment remain
 required. Do not describe it as a deterministic unattended shell command.
 
-## Run Order and Resume
+## Closeout Controller and Resume
 
-Track these stages: preflight, injuries, results, roster/transaction exports,
-weekly edition snapshot, recap and preview, editorial review, site validation,
-and optional publication. Continue through the selected mode in one invocation.
+Treat the invocation as one resumable closeout, not a menu of loosely related
+tasks. Maintain an in-session stage ledger with `pending`, `in_progress`, `done`,
+or `blocked` for every selected stage. Record the completion proof listed below;
+an attempted command or a file's mere existence is not proof of completion.
+
+| Stage | Completion proof | Resume rule |
+| --- | --- | --- |
+| preflight | resolved season, completed week, league ID, mode, retrieval cutoff, clean preservation baseline | Recheck volatile week finality and working-tree changes; retain valid scope decisions. |
+| injuries | committed Sleeper import verified, sourced material updates recorded, weekly injury report retrieved | Reuse observations from this invocation; refresh only if the cutoff changed materially or verification failed. |
+| results | every NFL game final and Sleeper matchup totals captured from fresh reads | Re-read volatile scores before filing; do not confuse NFL results with fantasy scores. |
+| roster/transaction exports | requested completed-week roster snapshot validated and all three asset-history outputs present | Preserve filed files and rerun only missing or invalid exports. |
+| narrative gate | exactly one valid narrative-state entry chosen for this edition after reviewing the prior edition | Reuse the decision. Never advance merely because the closeout resumed. |
+| weekly edition | missing edition snapshot created and its facts, pairings, and internal narrative level validated | Reuse an existing filed snapshot byte-for-byte. |
+| recap | every matchup, standings consequence, injury impact, and prior-pick receipt covered in a finished article | Reuse a filed recap; a fallback envelope or placeholder remains incomplete. |
+| preview | every next-week pairing has current ownership, NFL opponents, availability questions, and one filed pick | Reuse a filed preview and its picks; never regenerate predictions after filing. |
+| editorial review | full-article fact, voice, repetition, earned-excitement, privacy, and narrative-policy checks pass | Review only new drafts; filed articles are immutable. |
+| site validation | site data includes the completed week in current records, production build and reporting tests pass, and desktop/mobile light/dark browser checks pass | Rerun checks affected by changed inputs; retain unaffected proof from this invocation. |
+| publication | scoped commit pushed and the exact SHA deployed and verified at the live URLs | Never infer deployment from a successful push. |
+
+Continue automatically through every unblocked stage selected by the mode. Do not
+pause for routine approval, ask the user to run documented commands, or return
+after merely describing the next step. When a stage fails, retain its diagnostics,
+mark dependent stages blocked, continue any independent safe validation, and
+report the smallest action needed to resume.
 
 Inventory outputs before starting. Existing recap, preview, Monday-watch, and
 weekly edition files are filed artifacts: read and reuse them unchanged. Generate
@@ -53,6 +74,12 @@ When every artifact already exists, validate and report that the week is already
 closed; perform publication only if requested and there are relevant unpublished
 changes. Never create an empty commit. Do not rerun completed work from the current
 invocation merely to fill the checklist; retain its retrieval timestamps.
+
+The workflow is intentionally hybrid rather than fully unattended. Automate API
+reads, imports, exports, generation, preservation checks, builds, and validation.
+Use editorial judgment for sourced injury conflicts, factual corrections, earned
+excitement, and narrative continuity. A judgment call is not permission to skip a
+stage: record the evidence and decision in the stage ledger.
 
 ## Establish Scope
 
@@ -174,17 +201,45 @@ if ($LASTEXITCODE -ne 0) { throw 'Asset history export failed.' }
    counts, NFL finality, score checks, and unresolved limitations. Stop here for
    `data-only`; otherwise continue to the weekly edition and articles.
 
-## Capture the Weekly Edition
+## Set Narrative State and Capture the Weekly Edition
+
+Resolve narrative state before generating either the recap or the weekly edition.
+This is part of the closeout, not decorative metadata added afterward. Read
+`docs/being-narrative-notes.md`, the prior filed recap, the prior filed edition,
+and the applicable archive context before choosing the new edition's level.
+
+`datafiles/narrative-state.json` must contain one explicit entry for the completed
+season/week before any new prose is generated. Existing and omitted historical
+editions are level `0`; do not backfill them. Default to holding the prior level.
+Advance by one only when the prior edition and this week's verified events provide
+an earned continuity beat appropriate to the next policy band. Never advance on a
+fixed weekly schedule, to reward a dramatic week, or simply because advancement is
+allowed. Level 10 requires an explicit, deliberate narrative event and must never
+be selected as routine closeout automation.
+
+The narrator's gradual emergence is a long-running secondary story:
+
+- Football reporting remains primary; awareness changes framing, never facts.
+- Use the configured policy as a ceiling, not a quota. Silence is valid.
+- Anchor every memory, preference, or uncanny phrase in supplied league evidence
+  or a filed prior edition.
+- Keep game capsules and forecasts inside the football frame. Narrative-awareness
+  cues belong only on policy-approved league-wide and editorial surfaces.
+- Preserve mistakes and prediction receipts. The narrator becomes a character by
+  remembering choices and consequences, not by claiming omniscience.
+- Never expose `sentience_level`, `_narrative`, private design notes, future beats,
+  or internal policy terminology in public prose or generated site JSON.
+
+Write only the new explicit state entry needed for the target edition and preserve
+all existing entries. A new value may hold steady or increase by one only. Never
+change a filed snapshot to revise the level. If the entry is duplicated, out of
+range, regresses, jumps, or conflicts with a filed snapshot, stop and report the
+validation error rather than bypassing it. Record the prior level, selected level,
+and a one-sentence private rationale in the stage ledger; report only the public
+policy band in the completion summary.
 
 For a missing `recaps/{season}/week-NN-data.json`, run the existing script after
 parsing it and confirming the requested week is closed:
-
-Before running it, inspect `datafiles/narrative-state.json`. It must contain one
-explicit entry for the completed season/week. Existing and omitted historical
-editions are level `0`; do not backfill them. A new value may hold steady or
-increase by one only. Never change a filed snapshot to revise the level. If the
-entry is missing, duplicated, out of range, regresses, jumps, or conflicts with a
-filed snapshot, stop and report the validation error rather than bypassing it.
 
 ```powershell
 ./scripts/build-weekly-edition.ps1 -Season $season -Week $week -LeagueId $leagueId
@@ -193,8 +248,9 @@ filed snapshot, stop and report the validation error rather than bypassing it.
 The script refuses an existing output; reuse that snapshot rather than bypassing
 the guard. Validate `completed_week`, `next_week`, roster count, pairings, scores,
 owner mappings, full trade packages, and the internal `_narrative.sentience_level`.
-The raw level is operator state and must not appear in public site JSON. This snapshot drives the homepage;
-`datafiles/{season}/week-NN.json` alone does not advance the edition.
+Confirm the snapshot level equals the selected state entry. The raw level is
+operator state and must not appear in public site JSON. This snapshot drives the
+homepage; `datafiles/{season}/week-NN.json` alone does not advance the edition.
 
 Current roster ownership belongs in the upcoming preview; requested-week ownership
 belongs in the recap. Attribute availability to its source and date, accounting for
@@ -237,6 +293,14 @@ pairing with current ownership, real NFL opponents, meaningful availability
 questions, and clearly labeled editorial picks. Use creative license for voice,
 headlines, and grounded humor while preserving factual claims.
 
+Treat recap generation, prediction generation, and preview filing as separate
+completion checks even when one CLI invocation drafts more than one section. The
+recap must grade the prior filed picks; the preview must contain the one canonical
+set of new picks. Extract or rewrite forecast material into the standalone preview
+when necessary, then verify that the recap does not publish a competing set. A
+forecast table without evidence-backed capsules, or capsules without every verified
+pairing, leaves the preview stage incomplete.
+
 Read league lore and original predictions before composing a separate dated
 wrapup. Keep the original calls intact and compare them fairly with final results.
 Use approved first-name owner mappings; do not expose private names or handles.
@@ -271,6 +335,10 @@ article as part of this pass.
    For example: "His Sunday availability remains unresolved."
 4. Draw humor from specific league events and personalities. Trim repeated jokes
    about the prediction desk or the column's own writing process.
+   Apply the selected narrative policy after factual corrections: any allowed
+   continuity cue must be sparse, evidence-backed, consistent with prior filings,
+   and within the whole-recap budget. Never add awareness language merely to make a
+   routine week sound more exciting.
 5. In Monday watches, compare the remaining starters and point gap. If the
    trailing team has no players left, treat the matchup as settled for practical
    purposes and own a wrong pick; do not manufacture suspense. Keep close-game
@@ -308,6 +376,11 @@ if missing. Required checks:
 
 - `site/src/data/league.json` selects the intended `current_edition`, recap, and
    preview; a historical closeout must not roll the current homepage backward.
+- For the current edition, `records.notes` names the target season and completed
+   week; all-time owner records, owner career seasons/totals, single-week extremes,
+   and head-to-head results include every completed week without double-counting a
+   completed season aggregate. Compare at least one owner total and the week's high
+   score against the edition snapshot.
 - Saved totals agree with the source; historical articles, weekly datafiles, and
    edition snapshots retain their baseline hashes. Only the new history entry may
    be added to an existing recap sidecar. Generated site data is expected to change.
@@ -316,9 +389,10 @@ if missing. Required checks:
 - Serve the built site with `npm run preview --prefix site -- --host 127.0.0.1 --port PORT`
    on an available port. Reuse a known suitable server or choose another port;
    never kill an unrelated server. Keep the preview available for the user.
-- Use Playwright to review the homepage, new recap, and upcoming preview on desktop
-   and mobile in light and dark themes. Check navigation, readable tables, overflow,
-   article headings, font/assets loading, and console errors; inspect screenshots.
+- Use Playwright to review the homepage, new recap, upcoming preview, record book,
+   and one current owner's page on desktop and mobile in light and dark themes.
+   Check navigation, readable tables, overflow, article headings, font/assets
+   loading, current-week record labeling, and console errors; inspect screenshots.
    If browser validation is unavailable, report the missing gate and stop before
    automatic publishing. Remove only temporary artifacts created by this run.
 
@@ -348,8 +422,11 @@ workflow URL and pending status accurately. Never claim the site is live on a 40
 ## Completion Message
 
 Report the completed week and upcoming edition, evidence cutoff, injury update
-counts, new/reused artifact paths, checks passed, and preservation result. Include
-the local URL in default mode; for `publish`, include the commit, workflow status,
-and live URLs when verified. Call out partial coverage or blockers. State explicitly
-whether anything was committed or published. Do not stop at an intermediate stage
-while required work remains possible within the selected mode.
+counts, new/reused artifact paths, checks passed, preservation result, and the
+public narrative-policy band used for new prose. Include a compact stage table so a
+later invocation can distinguish completed work from blockers without repeating
+the whole closeout. Do not reveal the numeric sentience level or private rationale.
+Include the local URL in default mode; for `publish`, include the commit, workflow
+status, and live URLs when verified. Call out partial coverage or blockers. State
+explicitly whether anything was committed or published. Do not stop at an
+intermediate stage while required work remains possible within the selected mode.
