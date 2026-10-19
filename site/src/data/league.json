@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-10-13T23:31:11.2740781Z",
+  "generated_at_utc": "2026-10-19T21:42:06.7444326Z",
   "league_name": "The League",
   "current_edition": {
     "season": 2026,
@@ -39608,6 +39608,12 @@
       "kind": "weekly-preview",
       "path": "recaps/2026/week-06-preview.md",
       "title": "Week 6 Preview: Depth Gets the First Word"
+    },
+    {
+      "season": 2026,
+      "kind": "article",
+      "path": "recaps/2026/week-06-what-to-watch.md",
+      "title": "Week 6 Monday Watch: Jake Needs the Two-in-831 Night"
     }
   ],
   "draft": {
